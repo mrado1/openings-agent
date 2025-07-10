@@ -128,7 +128,7 @@ describe('extractShowFields', () => {
         mockGenerateContent.mockResolvedValueOnce(mockResponse);
         const testHtml = '<div>test content</div>';
         await (0, extractFieldsGemini_1.extractShowFields)(testHtml, 'http://gallery.com');
-        expect(mockGetGenerativeModel).toHaveBeenCalledWith({ model: 'gemini-pro' });
+        expect(mockGetGenerativeModel).toHaveBeenCalledWith({ model: 'gemini-1.5-flash' });
         expect(mockGenerateContent).toHaveBeenCalledWith(expect.stringContaining('Extract art show information from this HTML'));
         expect(mockGenerateContent).toHaveBeenCalledWith(expect.stringContaining(testHtml));
     });
