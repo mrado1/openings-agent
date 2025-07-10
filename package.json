@@ -1,0 +1,36 @@
+{
+  "name": "agent",
+  "version": "1.0.0",
+  "main": "dist/main.js",
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "dev": "ts-node src/main.ts",
+    "build": "tsc",
+    "extract": "ts-node src/main.ts",
+    "compare-extraction": "ts-node src/compare-baseline.ts",
+    "query-baseline": "node query-baseline.js"
+  },
+  "keywords": ["art", "extractor", "ai", "automation"],
+  "author": "",
+  "license": "ISC",
+  "description": "AI Show Extractor - Automated art show data extraction system",
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "@types/cheerio": "^0.22.35",
+    "@types/node": "^22.10.2",
+    "axios": "^1.7.9",
+    "cheerio": "^1.0.0",
+    "dotenv": "^16.4.7",
+    "openai": "^4.73.1",
+    "pg": "^8.13.1",
+    "playwright": "^1.49.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5"
+  }
+}

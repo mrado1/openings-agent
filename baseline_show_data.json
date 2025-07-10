@@ -1,0 +1,23 @@
+{
+  "note": "PLACEHOLDER - Run query-baseline.js when Scene database is running",
+  "existing_data": {
+    "show_id": "TBD",
+    "title": "Telos Tales",
+    "artist_names": ["Alicja Kwade"],
+    "gallery_name": "TBD",
+    "gallery_address": "TBD",
+    "gallery_website": "TBD",
+    "start_date": "TBD",
+    "end_date": "TBD",
+    "press_release": "TBD",
+    "image_url": "TBD",
+    "source_url": "TBD",
+    "has_been_enriched": false
+  },
+  "extraction_target": {
+    "gallery_url": "extracted_gallery_website_url",
+    "expected_show_title": "Telos Tales",
+    "expected_artist": "Alicja Kwade"
+  },
+  "setup_note": "Run 'node query-baseline.js' once Scene database is running on port 5433"
+} 
