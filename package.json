@@ -9,13 +9,17 @@
     "build": "tsc",
     "extract": "ts-node src/main.ts",
     "extract-enhanced": "ts-node src/main.ts --enhanced",
-    "compare-models": "ts-node src/compareModels.ts",
     "compare-extraction": "ts-node src/compare-baseline.ts",
     "query-baseline": "ts-node src/query-baseline.ts",
     "test-dates": "npm run extract-enhanced https://www.pacegallery.com/exhibitions/alicja-kwade-telos-tales/ && npm run compare-extraction",
     "test-press-release": "npm run extract-enhanced https://www.pacegallery.com/exhibitions/alicja-kwade-telos-tales/ && npm run compare-extraction"
   },
-  "keywords": ["art", "extractor", "ai", "automation"],
+  "keywords": [
+    "art",
+    "extractor",
+    "ai",
+    "automation"
+  ],
   "author": "",
   "license": "ISC",
   "description": "AI Show Extractor - Automated art show data extraction system",
@@ -29,7 +33,6 @@
     "dotenv": "^16.4.7",
     "openai": "^4.73.1",
     "pg": "^8.13.1",
-    "playwright": "^1.49.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.2"
   },

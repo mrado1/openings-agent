@@ -13,15 +13,17 @@ async function extractShow(showUrl: string, enhanced: boolean = false): Promise<
   console.log(`🔍 Starting ${enhanced ? 'enhanced' : 'standard'} extraction for: ${showUrl}`);
   
   try {
-    // Step 1: Fetch and clean HTML
+    // Step 1: Fetch and clean HTML content
     console.log('📥 Fetching HTML content...');
     const html = await fetchAndCleanHtml(showUrl);
-    console.log(`✅ Fetched ${html.length} characters of cleaned HTML`);
+    console.log(`✅ Fetched ${html.length} characters`);
 
     // Step 2: Extract fields using Gemini (enhanced prompts)
     console.log('🔮 Extracting fields with Gemini...');
+    const extractionStart = Date.now();
     const extractedData = await extractShowFields(html, showUrl);
-    console.log('✅ Gemini extraction completed');
+    const extractionTime = Date.now() - extractionStart;
+    console.log(`✅ Gemini extraction completed in ${extractionTime}ms`);
 
     // Step 3: Validate results
     console.log('📊 Validating extraction results...');
