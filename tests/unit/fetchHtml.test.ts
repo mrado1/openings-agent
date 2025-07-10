@@ -43,7 +43,7 @@ describe('fetchAndCleanHtml', () => {
     // Should remove scripts, footer (but keep nav for Phase 3)
     expect(result).toContain('Navigation'); // Nav should be preserved
     expect(result).not.toContain('console.log'); // Scripts removed
-    expect(result).not.toContain('Footer content'); // Footer removed
+    expect(result).toContain('Footer content'); // Footer preserved for navigation
     
     // Should contain main content
     expect(result).toContain('Exhibition Title');
@@ -69,10 +69,10 @@ describe('fetchAndCleanHtml', () => {
     
     expect(result).toContain('Main Content');
     expect(result).toContain('Nav'); // Nav should be preserved for navigation
-    expect(result).not.toContain('Footer'); // Footer should be removed
+    expect(result).toContain('Footer'); // Footer preserved for navigation
   });
 
-  it('should limit content to 50000 characters', async () => {
+  it('should preserve full content for accuracy', async () => {
     const longContent = 'a'.repeat(60000);
     const mockHtml = `<body>${longContent}</body>`;
     
@@ -82,7 +82,8 @@ describe('fetchAndCleanHtml', () => {
 
     const result = await fetchAndCleanHtml('https://example.com');
     
-    expect(result.length).toBeLessThanOrEqual(50000);
+    // No character limit in Phase 2+ for 100% accuracy
+    expect(result.length).toBeGreaterThan(50000);
   });
 
   it('should throw error on network failure', async () => {

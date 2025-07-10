@@ -154,7 +154,7 @@ describe('extractShowFields', () => {
     
     expect(mockGetGenerativeModel).toHaveBeenCalledWith({ model: 'gemini-1.5-flash' });
     expect(mockGenerateContent).toHaveBeenCalledWith(
-      expect.stringContaining('Extract art show information from this HTML')
+      expect.stringContaining('You are an expert art gallery website parser')
     );
     expect(mockGenerateContent).toHaveBeenCalledWith(
       expect.stringContaining(testHtml)
