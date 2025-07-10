@@ -9,7 +9,7 @@
     "build": "tsc",
     "extract": "ts-node src/main.ts",
     "compare-extraction": "ts-node src/compare-baseline.ts",
-    "query-baseline": "node query-baseline.js"
+    "query-baseline": "ts-node src/query-baseline.ts"
   },
   "keywords": ["art", "extractor", "ai", "automation"],
   "author": "",
@@ -19,6 +19,7 @@
     "@google/generative-ai": "^0.21.0",
     "@types/cheerio": "^0.22.35",
     "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
     "axios": "^1.7.9",
     "cheerio": "^1.0.0",
     "dotenv": "^16.4.7",
