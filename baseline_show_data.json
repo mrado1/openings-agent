@@ -1,23 +1,23 @@
 {
-  "note": "PLACEHOLDER - Run query-baseline.js when Scene database is running",
   "existing_data": {
-    "show_id": "TBD",
+    "show_id": 264,
     "title": "Telos Tales",
-    "artist_names": ["Alicja Kwade"],
-    "gallery_name": "TBD",
-    "gallery_address": "TBD",
-    "gallery_website": "TBD",
-    "start_date": "TBD",
-    "end_date": "TBD",
-    "press_release": "TBD",
-    "image_url": "TBD",
-    "source_url": "TBD",
+    "artist_names": [
+      "Alicja Kwade"
+    ],
+    "gallery_name": "Pace | 540 West 25th Street",
+    "gallery_address": "540 West 25th Street, New York, NY 10001",
+    "gallery_website": "pacegallery.com",
+    "start_date": "2025-05-07T04:00:00.000Z",
+    "end_date": "2025-08-15T04:00:00.000Z",
+    "press_release": "Featuring never-before-seen monumental sculptures alongside new mixed media works, \"Telos Tales\" marks Kwade’s debut solo show at Pace in New York since the gallery began representing her in 2023.",
+    "image_url": "https://artguide.artforum.com/uploads/guide.007/id18384/exhibition00.jpg",
+    "source_url": "https://artguide.artforum.com/artguide/pace-540-west-25th-street-19795/telos-tales-247760",
     "has_been_enriched": false
   },
   "extraction_target": {
-    "gallery_url": "extracted_gallery_website_url",
+    "gallery_url": "pacegallery.com",
     "expected_show_title": "Telos Tales",
     "expected_artist": "Alicja Kwade"
-  },
-  "setup_note": "Run 'node query-baseline.js' once Scene database is running on port 5433"
-} 
+  }
+}
