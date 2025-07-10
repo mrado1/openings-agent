@@ -1,6 +1,0 @@
-{
-  "success": false,
-  "error": "Gemini extraction failed: [GoogleGenerativeAI Error]: Error fetching from https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent: [400 Bad Request] API key not valid. Please pass a valid API key. [{\"@type\":\"type.googleapis.com/google.rpc.ErrorInfo\",\"reason\":\"API_KEY_INVALID\",\"domain\":\"googleapis.com\",\"metadata\":{\"service\":\"generativelanguage.googleapis.com\"}},{\"@type\":\"type.googleapis.com/google.rpc.LocalizedMessage\",\"locale\":\"en-US\",\"message\":\"API key not valid. Please pass a valid API key.\"}]",
-  "show_url": "https://www.pacegallery.com/exhibitions/alicja-kwade-telos-tales/",
-  "processed_at": "2025-07-10T04:20:30.378Z"
-}
