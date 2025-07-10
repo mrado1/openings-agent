@@ -8,8 +8,12 @@
     "dev": "ts-node src/main.ts",
     "build": "tsc",
     "extract": "ts-node src/main.ts",
+    "extract-enhanced": "ts-node src/main.ts --enhanced",
+    "compare-models": "ts-node src/compareModels.ts",
     "compare-extraction": "ts-node src/compare-baseline.ts",
-    "query-baseline": "ts-node src/query-baseline.ts"
+    "query-baseline": "ts-node src/query-baseline.ts",
+    "test-dates": "npm run extract-enhanced https://www.pacegallery.com/exhibitions/alicja-kwade-telos-tales/ && npm run compare-extraction",
+    "test-press-release": "npm run extract-enhanced https://www.pacegallery.com/exhibitions/alicja-kwade-telos-tales/ && npm run compare-extraction"
   },
   "keywords": ["art", "extractor", "ai", "automation"],
   "author": "",
