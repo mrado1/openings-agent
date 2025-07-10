@@ -4,7 +4,8 @@ import { ShowData } from '../types/schemas';
 export async function extractShowFields(html: string, galleryUrl: string): Promise<Partial<ShowData>> {
   // Initialize genAI after environment is loaded
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  const modelName = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+  const model = genAI.getGenerativeModel({ model: modelName });
   
   const prompt = `You are an expert art gallery website parser. Extract exhibition information from this HTML with high precision.
 
@@ -34,9 +35,13 @@ IMPORTANT:
 HTML CONTENT:
 ${html}`;
 
+  let rawResponse = '';
   try {
     const result = await model.generateContent(prompt);
     const text = result.response.text();
+    rawResponse = text; // Store for error logging
+    
+    console.log(`📝 Gemini response length: ${text.length} characters`);
     
     // Clean JSON (remove markdown formatting)
     let jsonStr = text.replace(/```json|```/g, '').trim();
@@ -45,6 +50,8 @@ ${html}`;
     if (jsonStr.startsWith('```')) {
       jsonStr = jsonStr.replace(/```[\w]*\n?/g, '').trim();
     }
+    
+    console.log(`🔍 Attempting to parse JSON (${jsonStr.length} chars): ${jsonStr.substring(0, 200)}...`);
     
     const parsed = JSON.parse(jsonStr);
     
@@ -57,6 +64,16 @@ ${html}`;
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
+    
+    // Enhanced error logging for JSON parsing issues
+    if (error instanceof SyntaxError && error.message.includes('JSON')) {
+      console.error('🚨 JSON Parsing Error Details:');
+      console.error('Error:', error.message);
+      console.error('Raw Gemini response (first 500 chars):', rawResponse.substring(0, 500));
+      console.error('Response length:', rawResponse.length);
+      console.error('Last 200 chars:', rawResponse.slice(-200));
+    }
+    
     throw new Error(`Gemini extraction failed: ${message}`);
   }
 } 

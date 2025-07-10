@@ -59,55 +59,58 @@ describe('UrlFilterService', () => {
     }
   });
 
-  it('should boost known gallery domains', () => {
+  it('should score domain indicators correctly', () => {
     const searchResults = [
       {
-        title: 'Random Gallery',
-        link: 'https://unknowngallery.com/about',
-        snippet: 'Learn about our space...',
-        displayLink: 'unknowngallery.com'
+        title: 'Random Site',
+        link: 'https://randomsite.com/about',
+        snippet: 'Learn about our company...',
+        displayLink: 'randomsite.com'
       },
       {
-        title: 'Gagosian Current Shows',
-        link: 'https://gagosian.com/exhibitions/current',
+        title: 'Gallery Current Shows',
+        link: 'https://artgallery.com/exhibitions/current',
         snippet: 'New exhibition featuring contemporary art...',
-        displayLink: 'gagosian.com'
+        displayLink: 'artgallery.com'
       }
     ];
     
     const filtered = filter.filterGalleryUrls(searchResults);
     
-    // Find results by URL since order may vary
-    const gagosianResult = filtered.find(f => f.url.includes('gagosian.com'));
-    const unknownResult = filtered.find(f => f.url.includes('unknowngallery.com'));
+    // Find results by URL
+    const galleryResult = filtered.find(f => f.url.includes('artgallery.com'));
+    const randomResult = filtered.find(f => f.url.includes('randomsite.com'));
     
-    // Gagosian should be ranked higher due to known gallery boost
-    expect(gagosianResult).toBeDefined();
-    expect(unknownResult).toBeDefined();
-    // Check that Gagosian appears first in the sorted results (higher confidence)
-    expect(filtered[0].url).toContain('gagosian.com');
+    // Gallery domain should be ranked higher due to gallery indicators
+    expect(galleryResult).toBeDefined();
+    expect(galleryResult!.confidence).toBeGreaterThan(randomResult?.confidence || 0);
   });
 
   it('should score exhibition paths higher', () => {
     const searchResults = [
       {
         title: 'About Page',
-        link: 'https://testgallery.com/about',
-        snippet: 'Learn about our gallery...',
-        displayLink: 'testgallery.com'
+        link: 'https://example.com/about',
+        snippet: 'Learn about our company...',
+        displayLink: 'example.com'
       },
       {
         title: 'Current Exhibition',
-        link: 'https://testgallery.com/exhibitions/current-show',
+        link: 'https://example.com/exhibitions/current-show',
         snippet: 'New exhibition featuring contemporary artworks...',
-        displayLink: 'testgallery.com'
+        displayLink: 'example.com'
       }
     ];
     
     const filtered = filter.filterGalleryUrls(searchResults);
     
-    // Exhibition path should appear first due to higher confidence
-    expect(filtered.length).toBeGreaterThan(0);
-    expect(filtered[0].url).toContain('/exhibitions/');
+    // Find results by URL
+    const aboutResult = filtered.find(f => f.url.includes('/about'));
+    const exhibitionResult = filtered.find(f => f.url.includes('/exhibitions/'));
+    
+    // Exhibition path should have higher confidence due to path boost
+    expect(aboutResult).toBeDefined();
+    expect(exhibitionResult).toBeDefined();
+    expect(exhibitionResult!.confidence).toBeGreaterThan(aboutResult!.confidence);
   });
 }); 

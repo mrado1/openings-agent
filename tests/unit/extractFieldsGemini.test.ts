@@ -152,7 +152,8 @@ describe('extractShowFields', () => {
     const testHtml = '<div>test content</div>';
     await extractShowFields(testHtml, 'http://gallery.com');
     
-    expect(mockGetGenerativeModel).toHaveBeenCalledWith({ model: 'gemini-1.5-flash' });
+    const expectedModel = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+    expect(mockGetGenerativeModel).toHaveBeenCalledWith({ model: expectedModel });
     expect(mockGenerateContent).toHaveBeenCalledWith(
       expect.stringContaining('You are an expert art gallery website parser')
     );

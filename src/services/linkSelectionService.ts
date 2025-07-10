@@ -20,7 +20,8 @@ export class LinkSelectionService {
 
     // Initialize genAI after environment is loaded (like extractFieldsGemini.ts)
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const modelName = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+    const model = genAI.getGenerativeModel({ model: modelName });
 
     const contextHint = `Looking for exhibition: "${context.title}" by ${context.artist} at ${context.gallery} (${context.year})`;
 

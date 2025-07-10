@@ -69,13 +69,19 @@ export class DiscoveryPipeline {
           continue;
         }
         
-        // Let Gemini select the best URL
-        bestUrl = await this.linkSelector.selectExhibitionUrl(filteredUrls, context);
-        result.discoveredUrl = bestUrl;
-        
-        // If we found a URL with good confidence, stop searching
+        // Check if we have perfect confidence - skip Gemini if so
         const topConfidence = filteredUrls[0]?.confidence || 0;
         console.log(`📊 Top URL confidence: ${(topConfidence * 100).toFixed(0)}%`);
+        
+        if (topConfidence >= 1.0) {
+          // Perfect confidence - use top URL directly
+          bestUrl = filteredUrls[0].url;
+          console.log(`🎯 Perfect confidence! Using top URL directly: ${bestUrl}`);
+        } else {
+          // Let Gemini select the best URL from candidates
+          bestUrl = await this.linkSelector.selectExhibitionUrl(filteredUrls, context);
+        }
+        result.discoveredUrl = bestUrl;
         
         if (topConfidence > 0.7) {
           console.log(`✅ High confidence result found, stopping search`);
@@ -155,9 +161,12 @@ export class DiscoveryPipeline {
       score += 10;
       console.log(`✅ Press release found (${extracted.press_release.length} chars)`);
     }
-    if (extracted.images && extracted.images.length > 0) {
+    // Check for images (primary + additional)
+    const totalImages = (extracted.image_url ? 1 : 0) + 
+                       (extracted.additional_images ? extracted.additional_images.length : 0);
+    if (totalImages > 0) {
       score += 10;
-      console.log(`✅ Images found: ${extracted.images.length}`);
+      console.log(`✅ Images found: ${totalImages}`);
     }
     
     return Math.round((score / maxScore) * 100);

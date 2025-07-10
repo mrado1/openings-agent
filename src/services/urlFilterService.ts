@@ -40,9 +40,6 @@ export class UrlFilterService {
     if (this.isNewsArticle(result.title, result.snippet)) confidence -= 0.3;
     if (this.isAggregatorSite(domain)) confidence -= 0.3;
     
-    // Boost known gallery domains
-    if (this.isKnownGallery(domain)) confidence += 0.4;
-    
     return {
       url: result.link,
       title: result.title,
@@ -101,14 +98,5 @@ export class UrlFilterService {
       'hyperallergic.com', 'frieze.com', 'artreview.com'
     ];
     return aggregators.some(agg => domain.includes(agg));
-  }
-
-  private isKnownGallery(domain: string): boolean {
-    const knownGalleries = [
-      'gagosian.com', 'pacegallery.com', 'davidzwirner.com',
-      'mariangoodman.com', 'hauserwirth.com', 'perrotin.com',
-      'lehmannmaupin.com', 'matthewmarks.com', 'petzel.com'
-    ];
-    return knownGalleries.some(gallery => domain.includes(gallery));
   }
 } 
