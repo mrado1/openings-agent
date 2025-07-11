@@ -21,12 +21,9 @@ interface EnrichedLocalShow {
     success: boolean;
     confidence: number;
     discovered_url?: string;
-    enriched_fields: {
-      press_release?: string;
-      image_url?: string;
-      additional_images?: string[];
-      show_summary?: string;
-    };
+    processing_time_seconds: number;
+    quality_criteria_met: number; // 0-4 based on quality criteria
+    enrichment_timestamp: string;
     errors: string[];
   };
 }
@@ -241,27 +238,27 @@ async function compareLocalToProduction(enrichmentFile: string): Promise<void> {
       console.log(`🔍 Comparing: "${localShow.title}" (ID: ${localShow.id})`);
       console.log(`   AI Success: ${aiSuccess}, Confidence: ${localShow.ai_enrichment.confidence}%`);
 
-      // Compare press release
+      // Compare press release (now in main fields)
       const pressReleaseComparison = compareField(
         localShow.press_release,
         productionShow.press_release,
-        localShow.ai_enrichment.enriched_fields.press_release,
+        localShow.press_release, // AI enriched data is now in main fields
         'press_release'
       );
 
-      // Compare images (simplified - count from enriched fields)
+      // Compare images (now in main fields)
       const imageComparison = compareField(
         { additional_images: localShow.additional_images },
         { additional_images: productionShow.additional_images },
-        localShow.ai_enrichment.enriched_fields.additional_images,
+        localShow.additional_images,
         'images'
       );
 
-      // Compare show summary
+      // Compare show summary (now in main fields)
       const summaryComparison = compareField(
         localShow.show_summary,
         productionShow.show_summary,
-        localShow.ai_enrichment.enriched_fields.show_summary,
+        localShow.show_summary, // AI enriched data is now in main fields
         'show_summary'
       );
 

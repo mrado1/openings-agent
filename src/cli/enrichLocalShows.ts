@@ -39,12 +39,9 @@ interface EnrichedLocalShow extends LocalUnenrichedShow {
     success: boolean;
     confidence: number;
     discovered_url?: string;
-    enriched_fields: {
-      press_release?: string;
-      image_url?: string;
-      additional_images?: string[];
-      show_summary?: string;
-    };
+    processing_time_seconds: number;
+    quality_criteria_met: number; // 0-4 based on quality criteria
+    enrichment_timestamp: string;
     errors: string[];
   };
 }
@@ -94,6 +91,9 @@ async function enrichLocalShows(localTestFile: string): Promise<void> {
       console.log(`   Current status: enriched=${localShow.has_been_enriched}`);
       
       try {
+        // Track processing time
+        const showStartTime = Date.now();
+        
         // Extract year from start_date
         const year = new Date(localShow.start_date).getFullYear().toString();
         
@@ -108,6 +108,7 @@ async function enrichLocalShows(localTestFile: string): Promise<void> {
         // Run AI discovery and extraction to enrich the show
         console.log(`   🚀 Running AI discovery pipeline...`);
         const aiResult = await pipeline.discoverAndExtract(context);
+        const processingTime = Math.round((Date.now() - showStartTime) / 1000);
         
         // Create enriched show object with AI results
         const enrichedShow: EnrichedLocalShow = {
@@ -116,41 +117,65 @@ async function enrichLocalShows(localTestFile: string): Promise<void> {
             success: aiResult.success,
             confidence: aiResult.confidence || 0,
             discovered_url: aiResult.discoveredUrl,
-            enriched_fields: {},
+            processing_time_seconds: processingTime,
+            quality_criteria_met: 0, // Will be calculated based on criteria
+            enrichment_timestamp: new Date().toISOString(),
             errors: aiResult.errors || []
           }
         };
-        
-        // Merge AI enrichment results with local data
+
+        // CRITICAL FIX: Update main show fields directly with AI-extracted data
         if (aiResult.success && aiResult.extractedData) {
-          // Only update fields that were previously empty/null or improve existing data
-          if (!localShow.press_release && aiResult.extractedData.press_release) {
-            enrichedShow.ai_enrichment.enriched_fields.press_release = aiResult.extractedData.press_release;
+          const aiData = aiResult.extractedData;
+          let qualityCriteriaMet = 0;
+          
+          // 1. Replace Artforum image_url with gallery image_url if found
+          if (aiData.image_url && !aiData.image_url.includes('artforum.com')) {
+            enrichedShow.image_url = aiData.image_url;
+            qualityCriteriaMet++; // Main image replaced criterion
+            console.log(`   🖼️ Replaced main image: ${localShow.image_url || 'none'} → ${aiData.image_url}`);
           }
           
-          if (!localShow.image_url && aiResult.extractedData.image_url) {
-            enrichedShow.ai_enrichment.enriched_fields.image_url = aiResult.extractedData.image_url;
+          // 2. Update additional_images if AI found images
+          if (aiData.additional_images && aiData.additional_images.length > 0) {
+            enrichedShow.additional_images = aiData.additional_images;
+            qualityCriteriaMet++; // Additional images found criterion
+            console.log(`   📸 Updated additional images: ${aiData.additional_images.length} images`);
           }
           
-          if ((!localShow.additional_images || localShow.additional_images.length === 0) && 
-              aiResult.extractedData.additional_images && aiResult.extractedData.additional_images.length > 0) {
-            enrichedShow.ai_enrichment.enriched_fields.additional_images = aiResult.extractedData.additional_images;
+          // 3. Update press_release if AI found better content
+          if (aiData.press_release && aiData.press_release.length > 50) {
+            enrichedShow.press_release = aiData.press_release;
+            qualityCriteriaMet++; // Press release found criterion
+            console.log(`   📄 Updated press release: ${(localShow.press_release?.length || 0)} → ${aiData.press_release.length} chars`);
           }
           
-          if (!localShow.show_summary && aiResult.extractedData.show_summary) {
-            enrichedShow.ai_enrichment.enriched_fields.show_summary = aiResult.extractedData.show_summary;
+          // 4. Update show_summary if AI generated one
+          if (aiData.show_summary && !localShow.show_summary) {
+            enrichedShow.show_summary = aiData.show_summary;
+            console.log(`   📝 Added show summary`);
+          }
+          
+          // 5. Accurate URL found criterion (gallery URL, not Artforum)
+          if (aiResult.discoveredUrl && !aiResult.discoveredUrl.includes('artforum.com')) {
+            qualityCriteriaMet++; // Accurate URL found criterion
+          }
+          
+          // Update quality criteria count
+          enrichedShow.ai_enrichment.quality_criteria_met = qualityCriteriaMet;
+          
+          // Determine if show should be marked as enriched (3+ criteria = 75% quality)
+          if (qualityCriteriaMet >= 3) {
+            enrichedShow.has_been_enriched = true;
+            console.log(`   ✅ Quality success! ${qualityCriteriaMet}/4 criteria met - marked as enriched`);
+          } else {
+            console.log(`   ⚠️ Quality insufficient: ${qualityCriteriaMet}/4 criteria met - needs review`);
           }
           
           successCount++;
           console.log(`   ✅ Enrichment successful! Confidence: ${aiResult.confidence}%`);
           console.log(`   🌐 Found URL: ${aiResult.discoveredUrl}`);
-          
-          const enrichedFields = Object.keys(enrichedShow.ai_enrichment.enriched_fields);
-          if (enrichedFields.length > 0) {
-            console.log(`   ➕ Enriched fields: ${enrichedFields.join(', ')}`);
-          } else {
-            console.log(`   ℹ️ No new fields enriched (existing data sufficient)`);
-          }
+          console.log(`   📊 Quality score: ${qualityCriteriaMet}/4 criteria met`);
         } else {
           console.log(`   ❌ Enrichment failed: ${aiResult.errors?.join(', ') || 'Unknown error'}`);
           errors.push(`Show ${i + 1} (${localShow.title}): ${aiResult.errors?.join(', ') || 'Unknown error'}`);
@@ -168,7 +193,10 @@ async function enrichLocalShows(localTestFile: string): Promise<void> {
           ai_enrichment: {
             success: false,
             confidence: 0,
-            enriched_fields: {},
+            discovered_url: undefined,
+            processing_time_seconds: 0,
+            quality_criteria_met: 0,
+            enrichment_timestamp: new Date().toISOString(),
             errors: [error.message]
           }
         };

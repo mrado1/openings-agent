@@ -40,23 +40,8 @@ interface EnrichedShow extends LocalUnenrichedShow {
     confidence: number;
     discovered_url?: string;
     processing_time_seconds: number;
-    added_data: {
-      press_release?: {
-        original_length: number;
-        ai_length: number;
-        content?: string;
-      };
-      images?: {
-        original_count: number;
-        ai_count: number;
-        additional_images?: string[];
-      };
-      show_summary?: {
-        original_exists: boolean;
-        ai_generated: boolean;
-        content?: string;
-      };
-    };
+    quality_criteria_met: number; // 0-4 based on quality criteria
+    enrichment_timestamp: string;
     errors: string[];
   };
 }
@@ -146,7 +131,8 @@ async function enrichTestShows(localTestFile: string): Promise<void> {
             confidence: aiResult.confidence || 0,
             discovered_url: aiResult.discoveredUrl,
             processing_time_seconds: processingTime,
-            added_data: {},
+            quality_criteria_met: 0, // Will be calculated based on criteria
+            enrichment_timestamp: new Date().toISOString(),
             errors: aiResult.errors || []
           }
         };
@@ -154,81 +140,69 @@ async function enrichTestShows(localTestFile: string): Promise<void> {
         // Analyze improvements if successful
         if (aiResult.success && aiResult.extractedData) {
           const aiData = aiResult.extractedData;
+          let qualityCriteriaMet = 0;
           
           // CRITICAL FIX: Update main show fields with AI-extracted data
-          // Replace Artforum image_url with gallery image_url if found
+          // 1. Replace Artforum image_url with gallery image_url if found
           if (aiData.image_url && !aiData.image_url.includes('artforum.com')) {
             enrichedShow.image_url = aiData.image_url;
+            qualityCriteriaMet++; // Main image replaced criterion
             console.log(`   🖼️ Replaced main image: ${localShow.image_url} → ${aiData.image_url}`);
           }
           
-          // Update additional_images if AI found better images
+          // 2. Update additional_images if AI found better images
           if (aiData.additional_images && aiData.additional_images.length > 0) {
             enrichedShow.additional_images = aiData.additional_images;
+            qualityCriteriaMet++; // Additional images found criterion
             console.log(`   📸 Updated additional images: ${aiData.additional_images.length} images`);
           }
           
-          // Update press_release if AI found better content
+          // 3. Update press_release if AI found better content
           if (aiData.press_release && aiData.press_release.length > originalPressReleaseLength) {
             enrichedShow.press_release = aiData.press_release;
+            qualityCriteriaMet++; // Press release found criterion
             console.log(`   📄 Updated press release: ${originalPressReleaseLength} → ${aiData.press_release.length} chars`);
           }
           
-          // Update show_summary if AI generated one
+          // 4. Update show_summary if AI generated one
           if (aiData.show_summary && !originalHasSummary) {
             enrichedShow.show_summary = aiData.show_summary;
             console.log(`   📝 Added show summary`);
           }
           
-          // Press release analysis for tracking
-          const aiPressReleaseLength = aiData.press_release?.length || 0;
-          if (aiPressReleaseLength > originalPressReleaseLength) {
-            enrichedShow.ai_enrichment.added_data.press_release = {
-              original_length: originalPressReleaseLength,
-              ai_length: aiPressReleaseLength,
-              content: aiData.press_release
-            };
+          // 5. Accurate URL found criterion (gallery URL, not Artforum)
+          if (aiResult.discoveredUrl && !aiResult.discoveredUrl.includes('artforum.com')) {
+            qualityCriteriaMet++; // Accurate URL found criterion
+          }
+          
+          // Update quality criteria count
+          enrichedShow.ai_enrichment.quality_criteria_met = qualityCriteriaMet;
+          
+          // Determine if show should be marked as enriched (3+ criteria = 75% quality)
+          if (qualityCriteriaMet >= 3) {
+            enrichedShow.has_been_enriched = true;
+            console.log(`   ✅ Quality success! ${qualityCriteriaMet}/4 criteria met - marked as enriched`);
+          } else {
+            console.log(`   ⚠️ Quality insufficient: ${qualityCriteriaMet}/4 criteria met - needs review`);
+          }
+          
+          // Count improvements for summary (track what actually was improved)
+          if (aiData.press_release && aiData.press_release.length > originalPressReleaseLength) {
             pressReleaseAdditions++;
           }
-          
-          // Image analysis - count additional_images from AI
-          const aiImageCount = (aiData.additional_images?.length || 0);
-          if (aiImageCount > 0) {
-            enrichedShow.ai_enrichment.added_data.images = {
-              original_count: originalImageCount,
-              ai_count: aiImageCount,
-              additional_images: aiData.additional_images
-            };
+          if (aiData.additional_images && aiData.additional_images.length > 0) {
             imageAdditions++;
           }
-          
-          // Summary analysis for tracking
           if (aiData.show_summary && !originalHasSummary) {
-            enrichedShow.ai_enrichment.added_data.show_summary = {
-              original_exists: originalHasSummary,
-              ai_generated: true,
-              content: aiData.show_summary
-            };
             summaryAdditions++;
           }
           
           successCount++;
           
-          // Log improvements
-          const improvements = [];
-          if (enrichedShow.ai_enrichment.added_data.press_release) {
-            improvements.push(`PR +${aiPressReleaseLength - originalPressReleaseLength} chars`);
-          }
-          if (enrichedShow.ai_enrichment.added_data.images) {
-            improvements.push(`Images +${aiImageCount}`);
-          }
-          if (enrichedShow.ai_enrichment.added_data.show_summary) {
-            improvements.push('Summary added');
-          }
-          
           console.log(`   ✅ Success! Confidence: ${aiResult.confidence}%`);
           console.log(`   🌐 Found URL: ${aiResult.discoveredUrl}`);
-          console.log(`   ➕ Improvements: ${improvements.length > 0 ? improvements.join(', ') : 'None'}`);
+          console.log(`   📊 Quality score: ${qualityCriteriaMet}/4 criteria met`);
+          console.log(`   ➕ Improvements: ${qualityCriteriaMet} criteria met`);
           console.log(`   ⏱️  Processing time: ${processingTime}s`);
           
         } else {
@@ -250,7 +224,8 @@ async function enrichTestShows(localTestFile: string): Promise<void> {
             success: false,
             confidence: 0,
             processing_time_seconds: processingTime,
-            added_data: {},
+            quality_criteria_met: 0,
+            enrichment_timestamp: new Date().toISOString(),
             errors: [error.message]
           }
         };

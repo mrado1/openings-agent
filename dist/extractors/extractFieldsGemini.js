@@ -4,6 +4,7 @@ exports.extractShowFields = extractShowFields;
 exports.processExtractedImages = processExtractedImages;
 exports.cleanExistingArtforumImages = cleanExistingArtforumImages;
 const generative_ai_1 = require("@google/generative-ai");
+const summaryGenerationService_1 = require("../services/summaryGenerationService");
 /**
  * Clean any existing Artforum URLs from show data
  */
@@ -175,7 +176,31 @@ ${html}`;
             jsonStr = jsonStr.replace(/```[\w]*\n?/g, '').trim();
         }
         console.log(`🔍 Attempting to parse JSON (${jsonStr.length} chars): ${jsonStr.substring(0, 200)}...`);
-        const parsed = JSON.parse(jsonStr);
+        let parsed;
+        try {
+            // First try - direct parsing
+            parsed = JSON.parse(jsonStr);
+        }
+        catch (firstError) {
+            console.log(`⚠️ Initial JSON parse failed, trying cleanup: ${firstError instanceof Error ? firstError.message : String(firstError)}`);
+            try {
+                // Second try - basic cleanup
+                let cleanedJson = jsonStr;
+                // Only fix obvious issues without aggressive regex
+                cleanedJson = cleanedJson.replace(/,(\s*[}\]])/g, '$1'); // Remove trailing commas
+                cleanedJson = cleanedJson.replace(/[\r\n]+/g, ' '); // Replace newlines with spaces in strings
+                cleanedJson = cleanedJson.replace(/\s+/g, ' '); // Normalize whitespace
+                parsed = JSON.parse(cleanedJson);
+                console.log(`✅ JSON parsed after basic cleanup`);
+            }
+            catch (secondError) {
+                console.error(`💥 JSON parsing failed even after cleanup:`);
+                console.error(`First error: ${firstError instanceof Error ? firstError.message : String(firstError)}`);
+                console.error(`Second error: ${secondError instanceof Error ? secondError.message : String(secondError)}`);
+                console.error(`Raw response: ${rawResponse.substring(0, 1000)}...`);
+                throw new Error(`Gemini extraction failed: ${firstError instanceof Error ? firstError.message : String(firstError)}`);
+            }
+        }
         // Process and validate images according to mobile-first strategy
         // Include any existing image URL for cleaning (might be Artforum URL from previous extraction)
         const processedImages = processExtractedImages(parsed.image_url || '', parsed.additional_images || [], galleryUrl, parsed.image_url // Pass existing image URL for cleaning
@@ -184,11 +209,26 @@ ${html}`;
         const originalImageCount = (parsed.image_url ? 1 : 0) + (parsed.additional_images?.length || 0);
         const processedImageCount = (processedImages.image_url ? 1 : 0) + processedImages.additional_images.length;
         console.log(`📸 Image processing: ${originalImageCount} → ${processedImageCount} images (${processedImages.image_url ? 'primary set' : 'no primary'})`);
+        // Generate summary if press release exists and no summary was provided
+        let generatedSummary = parsed.show_summary || '';
+        if (!generatedSummary && parsed.press_release && parsed.press_release.length > 100) {
+            try {
+                console.log(`📝 Generating summary from ${parsed.press_release.length} char press release...`);
+                generatedSummary = await (0, summaryGenerationService_1.generateShowSummary)(parsed.press_release, parsed.title, parsed.artists?.[0]);
+                console.log(`✅ Generated summary: ${generatedSummary.length} characters`);
+            }
+            catch (error) {
+                console.warn(`⚠️ Summary generation failed: ${error instanceof Error ? error.message : String(error)}`);
+                // Continue without summary - not a critical failure
+            }
+        }
         return {
             ...parsed,
             // Override image fields with processed results
             image_url: processedImages.image_url,
             additional_images: processedImages.additional_images,
+            // Add generated summary
+            show_summary: generatedSummary,
             // Standard metadata
             gallery_url: galleryUrl,
             extracted_at: new Date().toISOString(),

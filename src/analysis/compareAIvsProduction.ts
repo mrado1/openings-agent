@@ -25,23 +25,8 @@ interface EnrichedShow extends LocalUnenrichedShow {
     confidence: number;
     discovered_url?: string;
     processing_time_seconds: number;
-    added_data: {
-      press_release?: {
-        original_length: number;
-        ai_length: number;
-        content?: string;
-      };
-      images?: {
-        original_count: number;
-        ai_count: number;
-        additional_images?: string[];
-      };
-      show_summary?: {
-        original_exists: boolean;
-        ai_generated: boolean;
-        content?: string;
-      };
-    };
+    quality_criteria_met: number; // 0-4 based on quality criteria
+    enrichment_timestamp: string;
     errors: string[];
   };
 }
@@ -218,15 +203,15 @@ function validateEnrichmentQuality(enrichedShow: EnrichedShow): {
     criteria.main_image_replaced = true;
   }
 
-  // 3. Press release found (non-empty AI-generated content)
-  if (enrichedShow.ai_enrichment.added_data.press_release?.content && 
-      enrichedShow.ai_enrichment.added_data.press_release.content.length > 50) {
+  // 3. Press release found (non-empty AI-generated or improved content)
+  if (enrichedShow.press_release && 
+      enrichedShow.press_release.length > 50) {
     criteria.press_release_found = true;
   }
 
-  // 4. Additional images found (minimum 1 additional image)
-  if (enrichedShow.ai_enrichment.added_data.images?.additional_images && 
-      enrichedShow.ai_enrichment.added_data.images.additional_images.length >= 1) {
+  // 4. Additional images found (minimum 1 additional image from gallery)
+  if (enrichedShow.additional_images && 
+      enrichedShow.additional_images.length >= 1) {
     criteria.additional_images_found = true;
   }
 
@@ -317,17 +302,17 @@ async function compareAIvsProduction(enrichmentFile: string, productionFile: str
     
     totalProcessingTime += aiShow.ai_enrichment.processing_time_seconds;
 
-    // Calculate data counts
+    // Calculate data counts (now using main show fields)
     const localPrLength = aiShow.press_release?.length || 0;
-    const aiPrLength = aiShow.ai_enrichment.added_data.press_release?.ai_length || localPrLength;
+    const aiPrLength = localPrLength; // AI enrichment is now in main fields
     const productionPrLength = productionShow.press_release?.length || 0;
 
     const localImgCount = aiShow.image_url ? 1 : 0;
-    const aiImgCount = localImgCount + (aiShow.ai_enrichment.added_data.images?.ai_count || 0);
+    const aiImgCount = localImgCount + (aiShow.additional_images?.length || 0);
     const productionImgCount = (productionShow.image_url ? 1 : 0) + (productionShow.additional_images?.length || 0);
 
     const localHasSummary = !!aiShow.show_summary;
-    const aiGeneratedSummary = aiShow.ai_enrichment.added_data.show_summary?.ai_generated || false;
+    const aiGeneratedSummary = !!aiShow.show_summary; // Summary is now in main fields if AI generated
     const productionHasSummary = !!productionShow.show_summary;
 
     // Compare AI vs Production (use quality success instead of basic success)
