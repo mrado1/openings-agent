@@ -1,6 +1,8 @@
-import { Client } from 'pg';
+import axios from 'axios';
 import * as fs from 'fs';
 import * as path from 'path';
+
+const PRODUCTION_API_URL = 'https://scene-michael-rado.vercel.app';
 
 interface LocalUnenrichedShow {
   id: number;
@@ -64,8 +66,48 @@ interface ProductionTestSet {
   extracted_at: string;
 }
 
+async function fetchShowFromProduction(id: number): Promise<ProductionEnrichedShow | null> {
+  try {
+    const response = await axios.get(`${PRODUCTION_API_URL}/api/shows/${id}`, {
+      timeout: 10000,
+      headers: {
+        'User-Agent': 'Scene-AI-Agent/1.0'
+      }
+    });
+
+    const show = response.data;
+    
+    // Transform API response to our expected format
+    return {
+      id: show.id,
+      title: show.title,
+      artist_names: show.artists ? show.artists.map((a: any) => a.name) : [],
+      gallery_name: show.gallery?.name || show.gallery_name,
+      gallery_website: show.gallery?.website || show.gallery_website,
+      start_date: show.start_date,
+      end_date: show.end_date,
+      press_release: show.press_release,
+      image_url: show.image_url,
+      additional_images: show.additional_images,
+      show_summary: show.show_summary,
+      has_been_enriched: show.has_been_enriched,
+      source_url: show.source_url,
+      scraped_at: show.scraped_at,
+      gallery_address: show.gallery?.address || show.gallery_address,
+      enriched_at: show.enriched_at
+    };
+  } catch (error: any) {
+    if (error.response?.status === 404) {
+      console.warn(`⚠️  Show ID ${id} not found in production`);
+      return null;
+    }
+    throw error;
+  }
+}
+
 async function queryProductionEnriched(localTestFile: string): Promise<void> {
-  console.log(`🔍 Querying production for enriched shows matching: ${localTestFile}`);
+  console.log(`🔍 Querying production API for enriched shows matching: ${localTestFile}`);
+  console.log(`🌐 Production API: ${PRODUCTION_API_URL}`);
 
   // Load local test set to get IDs
   const localTestPath = path.join('outputs', localTestFile);
@@ -78,54 +120,24 @@ async function queryProductionEnriched(localTestFile: string): Promise<void> {
   
   console.log(`📋 Looking for ${localIds.length} show IDs in production:`, localIds);
 
-  const client = new Client({
-    host: 'scene-db.c9kxnz5y5swa.us-east-1.rds.amazonaws.com',
-    port: 5432,
-    database: 'scene_prod',
-    user: 'scene',
-    password: 'Scene2024!ProductionPassword',
-    ssl: {
-      rejectUnauthorized: false
-    }
-  });
-
   try {
-    await client.connect();
-    console.log('🔗 Connected to production Scene database');
+    // Fetch each show from production API
+    const foundShows: ProductionEnrichedShow[] = [];
+    const missingIds: number[] = [];
 
-    // Query for matching shows in production
-    const result = await client.query(`
-      SELECT s.*, g.name as gallery_name, g.website as gallery_website, g.address as gallery_address,
-             ARRAY_AGG(a.name ORDER BY a.name) as artist_names
-      FROM shows s 
-      JOIN galleries g ON s.gallery_id = g.id
-      JOIN artists a ON a.id = ANY(s.artist_ids)
-      WHERE s.id = ANY($1)
-      GROUP BY s.id, g.id, g.name, g.website, g.address
-      ORDER BY s.id;
-    `, [localIds]);
-
-    const foundShows: ProductionEnrichedShow[] = result.rows.map(row => ({
-      id: row.id,
-      title: row.title,
-      artist_names: row.artist_names,
-      gallery_name: row.gallery_name,
-      gallery_website: row.gallery_website,
-      start_date: row.start_date,
-      end_date: row.end_date,
-      press_release: row.press_release,
-      image_url: row.image_url,
-      additional_images: row.additional_images,
-      show_summary: row.show_summary,
-      has_been_enriched: row.has_been_enriched,
-      source_url: row.source_url,
-      scraped_at: row.scraped_at,
-      gallery_address: row.gallery_address,
-      enriched_at: row.enriched_at
-    }));
-
-    const foundIds = foundShows.map(show => show.id);
-    const missingIds = localIds.filter(id => !foundIds.includes(id));
+    for (const id of localIds) {
+      console.log(`🔍 Fetching show ID ${id} from production...`);
+      const show = await fetchShowFromProduction(id);
+      
+      if (show) {
+        foundShows.push(show);
+      } else {
+        missingIds.push(id);
+      }
+      
+      // Rate limiting - wait 500ms between requests
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
 
     console.log(`\n✅ Found ${foundShows.length}/${localIds.length} matching shows in production`);
     
@@ -153,7 +165,7 @@ async function queryProductionEnriched(localTestFile: string): Promise<void> {
 
     const productionTestSet: ProductionTestSet = {
       local_test_reference: localTestFile,
-      query_criteria: `Production enriched shows matching local test set IDs: [${localIds.join(', ')}]`,
+      query_criteria: `Production enriched shows matching local test set IDs via API: [${localIds.join(', ')}]`,
       production_shows: foundShows,
       found_count: foundShows.length,
       missing_count: missingIds.length,
@@ -178,13 +190,11 @@ async function queryProductionEnriched(localTestFile: string): Promise<void> {
     console.log(`   Has gallery website: ${hasGalleryWebsite}/${foundShows.length} (${Math.round(hasGalleryWebsite/foundShows.length*100)}%)`);
 
     console.log(`\n📁 Production test set saved to: ${filename}`);
-    console.log(`🔗 Next step: Run enrichment test, then compare results`);
+    console.log(`🔗 Next step: npm run compare-ai-vs-production <enrichment_file> <production_file>`);
 
   } catch (error: any) {
-    console.error(`❌ Production database query failed: ${error.message}`);
+    console.error(`❌ Production API query failed: ${error.message}`);
     throw error;
-  } finally {
-    await client.end();
   }
 }
 
@@ -194,7 +204,7 @@ async function main() {
   if (args.length === 0) {
     console.error('❌ Please provide local test set file name');
     console.log('Usage: npm run query-production-enriched <local_unenriched_test_set_file.json>');
-    console.log('Example: npm run query-production-enriched local_unenriched_test_set_1752182405592.json');
+    console.log('Example: npm run query-production-enriched local_unenriched_test_set_1752184045578.json');
     process.exit(1);
   }
 
@@ -210,4 +220,6 @@ async function main() {
 
 if (require.main === module) {
   main();
-} 
+}
+
+export { queryProductionEnriched }; 
