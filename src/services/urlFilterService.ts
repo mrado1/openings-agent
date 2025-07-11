@@ -9,11 +9,14 @@ export interface FilteredUrl {
 }
 
 export class UrlFilterService {
-  filterGalleryUrls(searchResults: SearchResult[]): FilteredUrl[] {
+  filterGalleryUrls(searchResults: SearchResult[], expectedGalleryWebsite?: string): FilteredUrl[] {
     console.log(`🔍 Filtering ${searchResults.length} search results for gallery URLs...`);
+    if (expectedGalleryWebsite) {
+      console.log(`🎯 Prioritizing URLs from expected gallery domain: ${expectedGalleryWebsite}`);
+    }
     
     const filtered = searchResults
-      .map(result => this.analyzeUrl(result))
+      .map(result => this.analyzeUrl(result, expectedGalleryWebsite))
       .filter(result => result.confidence > 0.3)
       .sort((a, b) => b.confidence - a.confidence);
     
@@ -22,11 +25,20 @@ export class UrlFilterService {
     return filtered;
   }
 
-  private analyzeUrl(result: SearchResult): FilteredUrl {
+  private analyzeUrl(result: SearchResult, expectedGalleryWebsite?: string): FilteredUrl {
     const url = new URL(result.link);
     const domain = url.hostname.toLowerCase();
     
     let confidence = 0.5; // Base confidence
+    
+    // MAJOR BOOST: Prioritize expected gallery domain
+    if (expectedGalleryWebsite) {
+      const expectedDomain = new URL(`https://${expectedGalleryWebsite.replace(/^https?:\/\//, '')}`).hostname.toLowerCase();
+      if (domain.includes(expectedDomain.replace('www.', '')) || expectedDomain.includes(domain.replace('www.', ''))) {
+        confidence += 0.4; // Major boost for matching gallery domain
+        console.log(`🎯 Found expected gallery domain: ${domain} matches ${expectedDomain}`);
+      }
+    }
     
     // Gallery domain indicators
     if (this.isGalleryDomain(domain)) confidence += 0.3;

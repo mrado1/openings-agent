@@ -3,6 +3,7 @@ export interface ShowSearchContext {
   artist: string;
   gallery: string;
   year: string;
+  gallery_website?: string; // For domain prioritization
 }
 
 export class SearchQueryBuilder {

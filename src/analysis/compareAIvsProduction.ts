@@ -137,6 +137,13 @@ interface ComparisonResults {
   test_parameters: {
     total_shows_tested: number;
     ai_success_rate: number;
+    ai_quality_success_rate: number;
+    quality_criteria_rates: {
+      accurate_url_rate: number;
+      main_image_replaced_rate: number;
+      press_release_found_rate: number;
+      additional_images_rate: number;
+    };
     shows_matched_in_production: number;
     shows_compared: number;
   };
@@ -175,6 +182,68 @@ interface ComparisonResults {
   extracted_at: string;
 }
 
+/**
+ * Validate 4 quality criteria for AI enrichment success:
+ * 1. Accurate URL found (correct gallery exhibition page)
+ * 2. Main image replaced (never Artforum URLs, always gallery images)
+ * 3. Press release found (non-empty content)
+ * 4. Additional images found (minimum 1 additional image)
+ */
+function validateEnrichmentQuality(enrichedShow: EnrichedShow): {
+  isQualitySuccess: boolean;
+  qualityCriteria: {
+    accurate_url_found: boolean;
+    main_image_replaced: boolean;
+    press_release_found: boolean;
+    additional_images_found: boolean;
+  };
+  qualityScore: number;
+} {
+  const criteria = {
+    accurate_url_found: false,
+    main_image_replaced: false,
+    press_release_found: false,
+    additional_images_found: false
+  };
+
+  // 1. Accurate URL found (discovered_url exists and is a gallery URL, not Artforum)
+  if (enrichedShow.ai_enrichment.discovered_url && 
+      !enrichedShow.ai_enrichment.discovered_url.includes('artforum.com')) {
+    criteria.accurate_url_found = true;
+  }
+
+  // 2. Main image replaced (image_url should be from gallery, never Artforum)
+  if (enrichedShow.image_url && 
+      !enrichedShow.image_url.includes('artforum.com')) {
+    criteria.main_image_replaced = true;
+  }
+
+  // 3. Press release found (non-empty AI-generated content)
+  if (enrichedShow.ai_enrichment.added_data.press_release?.content && 
+      enrichedShow.ai_enrichment.added_data.press_release.content.length > 50) {
+    criteria.press_release_found = true;
+  }
+
+  // 4. Additional images found (minimum 1 additional image)
+  if (enrichedShow.ai_enrichment.added_data.images?.additional_images && 
+      enrichedShow.ai_enrichment.added_data.images.additional_images.length >= 1) {
+    criteria.additional_images_found = true;
+  }
+
+  // Calculate quality score (0-100%)
+  const criteriaCount = Object.values(criteria).filter(Boolean).length;
+  const qualityScore = Math.round((criteriaCount / 4) * 100);
+
+  // Quality success requires at least 3 out of 4 criteria (75%)
+  const isQualitySuccess = criteriaCount >= 3;
+
+  return {
+    isQualitySuccess,
+    qualityCriteria: criteria,
+    qualityScore
+  };
+}
+
 async function compareAIvsProduction(enrichmentFile: string, productionFile: string): Promise<void> {
   console.log(`🔍 Comparing AI enrichment vs Production data`);
   console.log(`📊 AI Results: ${enrichmentFile}`);
@@ -201,9 +270,16 @@ async function compareAIvsProduction(enrichmentFile: string, productionFile: str
   // Create comparison for each show
   const showComparisons: ShowComparison[] = [];
   let aiSuccessCount = 0;
+  let qualitySuccessCount = 0;
   let totalProcessingTime = 0;
   let totalConfidence = 0;
   let discoverySuccessCount = 0;
+  
+  // Quality criteria tracking
+  let accurateUrlCount = 0;
+  let mainImageReplacedCount = 0;
+  let pressReleaseFoundCount = 0;
+  let additionalImagesCount = 0;
 
   // Performance counters
   let prBetter = 0, prWorse = 0, prEqual = 0, prFailed = 0;
@@ -218,12 +294,27 @@ async function compareAIvsProduction(enrichmentFile: string, productionFile: str
       continue;
     }
 
-    // Aggregate AI stats
+    // Validate quality criteria for this show
+    const qualityValidation = validateEnrichmentQuality(aiShow);
+    
+    // Aggregate AI stats (basic success from pipeline)
     if (aiShow.ai_enrichment.success) {
       aiSuccessCount++;
       totalConfidence += aiShow.ai_enrichment.confidence;
       if (aiShow.ai_enrichment.discovered_url) discoverySuccessCount++;
     }
+    
+    // Track quality-based success
+    if (qualityValidation.isQualitySuccess) {
+      qualitySuccessCount++;
+    }
+    
+    // Track individual quality criteria
+    if (qualityValidation.qualityCriteria.accurate_url_found) accurateUrlCount++;
+    if (qualityValidation.qualityCriteria.main_image_replaced) mainImageReplacedCount++;
+    if (qualityValidation.qualityCriteria.press_release_found) pressReleaseFoundCount++;
+    if (qualityValidation.qualityCriteria.additional_images_found) additionalImagesCount++;
+    
     totalProcessingTime += aiShow.ai_enrichment.processing_time_seconds;
 
     // Calculate data counts
@@ -239,16 +330,16 @@ async function compareAIvsProduction(enrichmentFile: string, productionFile: str
     const aiGeneratedSummary = aiShow.ai_enrichment.added_data.show_summary?.ai_generated || false;
     const productionHasSummary = !!productionShow.show_summary;
 
-    // Compare AI vs Production
-    const prComparison = aiShow.ai_enrichment.success ?
+    // Compare AI vs Production (use quality success instead of basic success)
+    const prComparison = qualityValidation.isQualitySuccess ?
       (aiPrLength > productionPrLength ? 'better' : 
        aiPrLength < productionPrLength ? 'worse' : 'equal') : 'failed';
     
-    const imgComparison = aiShow.ai_enrichment.success ?
+    const imgComparison = qualityValidation.isQualitySuccess ?
       (aiImgCount > productionImgCount ? 'better' : 
        aiImgCount < productionImgCount ? 'worse' : 'equal') : 'failed';
     
-    const sumComparison = aiShow.ai_enrichment.success ?
+    const sumComparison = qualityValidation.isQualitySuccess ?
       (aiGeneratedSummary && !productionHasSummary ? 'better' :
        !aiGeneratedSummary && productionHasSummary ? 'worse' : 'equal') : 'failed';
 
@@ -273,8 +364,8 @@ async function compareAIvsProduction(enrichmentFile: string, productionFile: str
       title: aiShow.title,
       artist_names: aiShow.artist_names,
       gallery_name: aiShow.gallery_name,
-      ai_success: aiShow.ai_enrichment.success,
-      ai_confidence: aiShow.ai_enrichment.confidence,
+      ai_success: qualityValidation.isQualitySuccess, // Use quality success instead of basic success
+      ai_confidence: qualityValidation.qualityScore, // Use quality score instead of pipeline confidence
       ai_processing_time: aiShow.ai_enrichment.processing_time_seconds,
       ai_discovered_url: aiShow.ai_enrichment.discovered_url,
       comparison: {
@@ -306,7 +397,8 @@ async function compareAIvsProduction(enrichmentFile: string, productionFile: str
 
     // Log comparison
     console.log(`\n📊 [${showComparisons.length}] "${aiShow.title}"`);
-    console.log(`   AI Success: ${aiShow.ai_enrichment.success} (${aiShow.ai_enrichment.confidence}% confidence)`);
+    console.log(`   AI Quality Success: ${qualityValidation.isQualitySuccess} (${qualityValidation.qualityScore}% quality score)`);
+    console.log(`   Quality Criteria: URL=${qualityValidation.qualityCriteria.accurate_url_found}, Image=${qualityValidation.qualityCriteria.main_image_replaced}, PR=${qualityValidation.qualityCriteria.press_release_found}, Additional=${qualityValidation.qualityCriteria.additional_images_found}`);
     console.log(`   Press Release: Local=${localPrLength} → AI=${aiPrLength} vs Prod=${productionPrLength} (${prComparison})`);
     console.log(`   Images: Local=${localImgCount} → AI=${aiImgCount} vs Prod=${productionImgCount} (${imgComparison})`);
     console.log(`   Summary: Local=${localHasSummary} → AI=${aiGeneratedSummary} vs Prod=${productionHasSummary} (${sumComparison})`);
@@ -316,6 +408,13 @@ async function compareAIvsProduction(enrichmentFile: string, productionFile: str
   const avgProcessingTime = Math.round(totalProcessingTime / enrichmentResults.enriched_shows.length);
   const avgConfidence = aiSuccessCount > 0 ? Math.round(totalConfidence / aiSuccessCount) : 0;
   const discoveryRate = Math.round((discoverySuccessCount / enrichmentResults.enriched_shows.length) * 100);
+  
+  // Calculate quality-based success rates
+  const qualitySuccessRate = Math.round((qualitySuccessCount / enrichmentResults.enriched_shows.length) * 100);
+  const accurateUrlRate = Math.round((accurateUrlCount / enrichmentResults.enriched_shows.length) * 100);
+  const mainImageReplacedRate = Math.round((mainImageReplacedCount / enrichmentResults.enriched_shows.length) * 100);
+  const pressReleaseFoundRate = Math.round((pressReleaseFoundCount / enrichmentResults.enriched_shows.length) * 100);
+  const additionalImagesRate = Math.round((additionalImagesCount / enrichmentResults.enriched_shows.length) * 100);
 
   // Calculate improvement and competitive rates
   const totalComparisons = showComparisons.length;
@@ -324,22 +423,36 @@ async function compareAIvsProduction(enrichmentFile: string, productionFile: str
   const improvementRate = Math.round((aiImprovements / (totalComparisons * 3)) * 100);
   const competitiveRate = Math.round((aiCompetitive / (totalComparisons * 3)) * 100);
 
-  // Production readiness score (weighted)
+  // Production readiness score (weighted) - use quality success rate
   const successWeight = 0.4;
   const improvementWeight = 0.3;
   const competitiveWeight = 0.3;
   const productionReadinessScore = Math.round(
-    (enrichmentResults.success_rate * successWeight) +
+    (qualitySuccessRate * successWeight) +
     (improvementRate * improvementWeight) +
     (competitiveRate * competitiveWeight)
   );
 
-  // Generate recommendations
+  // Generate recommendations based on quality criteria
   const recommendations: string[] = [];
-  if (enrichmentResults.success_rate >= 80) {
-    recommendations.push("✅ High AI success rate indicates system is production-ready");
+  if (qualitySuccessRate >= 80) {
+    recommendations.push("✅ High AI quality success rate indicates system is production-ready");
   } else {
-    recommendations.push("⚠️ Consider improving AI discovery pipeline reliability");
+    recommendations.push("⚠️ Consider improving AI quality - current rate below 80% threshold");
+  }
+  
+  // Quality-specific recommendations
+  if (accurateUrlRate < 80) {
+    recommendations.push("🔍 Improve URL discovery accuracy - only " + accurateUrlRate + "% found correct gallery URLs");
+  }
+  if (mainImageReplacedRate < 80) {
+    recommendations.push("🖼️ Fix image replacement strategy - " + (100 - mainImageReplacedRate) + "% still using Artforum URLs");
+  }
+  if (pressReleaseFoundRate < 60) {
+    recommendations.push("📄 Enhance press release extraction - only " + pressReleaseFoundRate + "% found quality content");
+  }
+  if (additionalImagesRate < 60) {
+    recommendations.push("📸 Improve additional image discovery - only " + additionalImagesRate + "% found extra images");
   }
 
   if (improvementRate >= 30) {
@@ -364,6 +477,13 @@ async function compareAIvsProduction(enrichmentFile: string, productionFile: str
     test_parameters: {
       total_shows_tested: enrichmentResults.enriched_shows.length,
       ai_success_rate: enrichmentResults.success_rate,
+      ai_quality_success_rate: qualitySuccessRate,
+      quality_criteria_rates: {
+        accurate_url_rate: accurateUrlRate,
+        main_image_replaced_rate: mainImageReplacedRate,
+        press_release_found_rate: pressReleaseFoundRate,
+        additional_images_rate: additionalImagesRate
+      },
       shows_matched_in_production: productionTestSet.found_count,
       shows_compared: totalComparisons
     },
@@ -410,9 +530,16 @@ async function compareAIvsProduction(enrichmentFile: string, productionFile: str
   console.log('\n🎯 AI vs PRODUCTION COMPARISON COMPLETE');
   console.log('=====================================');
   console.log(`📊 Shows Compared: ${totalComparisons}`);
-  console.log(`✅ AI Success Rate: ${enrichmentResults.success_rate}%`);
+  console.log(`✅ AI Basic Success Rate: ${enrichmentResults.success_rate}%`);
+  console.log(`🏆 AI Quality Success Rate: ${qualitySuccessRate}% (3/4 criteria required)`);
   console.log(`⏱️  Avg Processing Time: ${avgProcessingTime}s`);
   console.log(`🔍 Discovery Success Rate: ${discoveryRate}%`);
+  console.log('');
+  console.log('📋 Quality Criteria Performance:');
+  console.log(`   🌐 Accurate URL found: ${accurateUrlRate}% (${accurateUrlCount}/${enrichmentResults.enriched_shows.length})`);
+  console.log(`   🖼️ Main image replaced: ${mainImageReplacedRate}% (${mainImageReplacedCount}/${enrichmentResults.enriched_shows.length})`);
+  console.log(`   📄 Press release found: ${pressReleaseFoundRate}% (${pressReleaseFoundCount}/${enrichmentResults.enriched_shows.length})`);
+  console.log(`   📸 Additional images found: ${additionalImagesRate}% (${additionalImagesCount}/${enrichmentResults.enriched_shows.length})`);
   console.log('');
   console.log('📈 Performance vs Production:');
   console.log(`   Press Releases: Better=${prBetter}, Equal=${prEqual}, Worse=${prWorse}, Failed=${prFailed}`);
@@ -421,7 +548,7 @@ async function compareAIvsProduction(enrichmentFile: string, productionFile: str
   console.log('');
   console.log(`🏆 AI Improvement Rate: ${improvementRate}%`);
   console.log(`🥇 AI Competitive Rate: ${competitiveRate}%`);
-  console.log(`🚀 Production Readiness Score: ${productionReadinessScore}/100`);
+  console.log(`🚀 Production Readiness Score: ${productionReadinessScore}/100 (based on quality metrics)`);
   console.log('');
   console.log('🎯 Recommendations:');
   recommendations.forEach(rec => console.log(`   ${rec}`));
@@ -451,4 +578,6 @@ async function main() {
 
 if (require.main === module) {
   main();
-} 
+}
+
+export { validateEnrichmentQuality };

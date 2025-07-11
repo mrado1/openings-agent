@@ -176,7 +176,7 @@ if (require.main === module) {
             process.exit(1);
         }
         const files = fs.readdirSync(outputsDir)
-            .filter(f => f.startsWith('extraction_') && f.endsWith('.json'))
+            .filter(f => f.startsWith('extraction_') && f.endsWith('.json') && !f.includes('error'))
             .sort()
             .reverse();
         if (files.length === 0) {

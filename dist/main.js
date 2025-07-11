@@ -44,14 +44,16 @@ dotenv.config({ path: '.env.local' });
 async function extractShow(showUrl, enhanced = false) {
     console.log(`🔍 Starting ${enhanced ? 'enhanced' : 'standard'} extraction for: ${showUrl}`);
     try {
-        // Step 1: Fetch and clean HTML
+        // Step 1: Fetch and clean HTML content
         console.log('📥 Fetching HTML content...');
         const html = await (0, fetchHtml_1.fetchAndCleanHtml)(showUrl);
-        console.log(`✅ Fetched ${html.length} characters of cleaned HTML`);
+        console.log(`✅ Fetched ${html.length} characters`);
         // Step 2: Extract fields using Gemini (enhanced prompts)
         console.log('🔮 Extracting fields with Gemini...');
+        const extractionStart = Date.now();
         const extractedData = await (0, extractFieldsGemini_1.extractShowFields)(html, showUrl);
-        console.log('✅ Gemini extraction completed');
+        const extractionTime = Date.now() - extractionStart;
+        console.log(`✅ Gemini extraction completed in ${extractionTime}ms`);
         // Step 3: Validate results
         console.log('📊 Validating extraction results...');
         const validation = (0, validation_1.validateExtractionResult)(extractedData);

@@ -60,8 +60,9 @@ export class DiscoveryPipeline {
           continue;
         }
         
-        // Filter for gallery URLs
-        const filteredUrls = this.urlFilter.filterGalleryUrls(searchResults);
+        // Filter for gallery URLs with expected gallery website prioritization
+        const expectedWebsite = context.gallery_website || undefined;
+        const filteredUrls = this.urlFilter.filterGalleryUrls(searchResults, expectedWebsite);
         result.urlsFiltered += filteredUrls.length;
         
         if (filteredUrls.length === 0) {
@@ -119,7 +120,16 @@ export class DiscoveryPipeline {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error(`💥 Discovery pipeline failed: ${errorMessage}`);
-      result.errors.push(`Discovery failed: ${errorMessage}`);
+      
+      // Check if this was a rate limit error vs a genuine failure
+      if (errorMessage.includes('RATE_LIMIT:') || errorMessage.includes('Too Many Requests') || errorMessage.includes('quota')) {
+        result.errors.push(`API rate limit exceeded - temporary failure: ${errorMessage}`);
+      } else if (errorMessage.includes('No suitable exhibition URL found')) {
+        result.errors.push('No suitable exhibition URL found');
+      } else {
+        result.errors.push(`Discovery failed: ${errorMessage}`);
+      }
+      
       return result;
     }
   }

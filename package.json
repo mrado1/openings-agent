@@ -4,7 +4,13 @@
   "main": "dist/main.js",
   "scripts": {
     "test": "jest",
+    "test:unit": "jest --selectProjects unit",
+    "test:integration": "jest --selectProjects integration",
+    "test:all": "jest --selectProjects unit integration",
     "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:production-readiness": "jest --selectProjects integration --testNamePattern='Production Readiness'",
+    "test:discovery-validation": "jest --selectProjects integration --testNamePattern='Discovery Pipeline Validation'",
     "dev": "ts-node src/main.ts",
     "build": "tsc",
     "extract": "ts-node src/main.ts",

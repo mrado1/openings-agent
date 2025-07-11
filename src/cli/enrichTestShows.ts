@@ -130,7 +130,8 @@ async function enrichTestShows(localTestFile: string): Promise<void> {
           title: localShow.title || 'Untitled',
           artist: localShow.artist_names[0] || 'Unknown Artist',
           gallery: localShow.gallery_name,
-          year: year
+          year: year,
+          gallery_website: localShow.gallery_website || undefined
         };
         
         console.log(`   🚀 Running AI discovery pipeline...`);
@@ -154,7 +155,32 @@ async function enrichTestShows(localTestFile: string): Promise<void> {
         if (aiResult.success && aiResult.extractedData) {
           const aiData = aiResult.extractedData;
           
-          // Press release analysis
+          // CRITICAL FIX: Update main show fields with AI-extracted data
+          // Replace Artforum image_url with gallery image_url if found
+          if (aiData.image_url && !aiData.image_url.includes('artforum.com')) {
+            enrichedShow.image_url = aiData.image_url;
+            console.log(`   🖼️ Replaced main image: ${localShow.image_url} → ${aiData.image_url}`);
+          }
+          
+          // Update additional_images if AI found better images
+          if (aiData.additional_images && aiData.additional_images.length > 0) {
+            enrichedShow.additional_images = aiData.additional_images;
+            console.log(`   📸 Updated additional images: ${aiData.additional_images.length} images`);
+          }
+          
+          // Update press_release if AI found better content
+          if (aiData.press_release && aiData.press_release.length > originalPressReleaseLength) {
+            enrichedShow.press_release = aiData.press_release;
+            console.log(`   📄 Updated press release: ${originalPressReleaseLength} → ${aiData.press_release.length} chars`);
+          }
+          
+          // Update show_summary if AI generated one
+          if (aiData.show_summary && !originalHasSummary) {
+            enrichedShow.show_summary = aiData.show_summary;
+            console.log(`   📝 Added show summary`);
+          }
+          
+          // Press release analysis for tracking
           const aiPressReleaseLength = aiData.press_release?.length || 0;
           if (aiPressReleaseLength > originalPressReleaseLength) {
             enrichedShow.ai_enrichment.added_data.press_release = {
@@ -176,7 +202,7 @@ async function enrichTestShows(localTestFile: string): Promise<void> {
             imageAdditions++;
           }
           
-          // Summary analysis
+          // Summary analysis for tracking
           if (aiData.show_summary && !originalHasSummary) {
             enrichedShow.ai_enrichment.added_data.show_summary = {
               original_exists: originalHasSummary,

@@ -53,18 +53,45 @@ Respond with ONLY the number (1-${Math.min(filteredUrls.length, 8)}) of the best
       
       if (selection < 1 || selection > filteredUrls.length) {
         console.warn(`⚠️ Invalid Gemini selection: ${selection}, using highest confidence URL`);
-        return filteredUrls[0].url;
+        if (filteredUrls.length > 0 && filteredUrls[0]?.url) {
+          return filteredUrls[0].url;
+        } else {
+          throw new Error(`No valid URLs available for invalid selection fallback: ${selection}`);
+        }
       }
       
-      const selectedUrl = filteredUrls[selection - 1].url;
+      const selectedUrlData = filteredUrls[selection - 1];
+      if (!selectedUrlData?.url) {
+        throw new Error(`Selected URL at index ${selection - 1} is invalid or missing`);
+      }
+      
+      const selectedUrl = selectedUrlData.url;
       console.log(`✅ Gemini selected URL ${selection}: ${selectedUrl}`);
       return selectedUrl;
       
     } catch (error) {
-      // Fallback to highest confidence URL on any error
       const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      // Check for rate limiting specifically
+      if (errorMessage.includes('429') || errorMessage.includes('Too Many Requests') || errorMessage.includes('quota')) {
+        // For rate limits, we should still try to use the fallback but mark it as a rate limit issue
+        console.warn(`⚠️ Gemini API rate limit hit during URL selection, using highest confidence URL`);
+        if (filteredUrls.length > 0 && filteredUrls[0]?.url) {
+          return filteredUrls[0].url;
+        } else {
+          throw new Error(`RATE_LIMIT: Gemini rate limit and no fallback URLs available: ${errorMessage}`);
+        }
+      }
+      
+      // Fallback to highest confidence URL on any other error
       console.warn(`⚠️ Gemini selection failed, using highest confidence URL: ${errorMessage}`);
-      return filteredUrls[0].url;
+      
+      // Ensure we have a valid URL to return
+      if (filteredUrls.length > 0 && filteredUrls[0]?.url) {
+        return filteredUrls[0].url;
+      } else {
+        throw new Error(`No valid URLs available for fallback selection: ${errorMessage}`);
+      }
     }
   }
 

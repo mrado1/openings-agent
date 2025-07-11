@@ -147,9 +147,9 @@ async function queryProductionShows(): Promise<void> {
     
     return;
 
-  } catch (error) {
+  } catch (error: any) {
     console.error(`❌ Production database query failed: ${error.message}`);
-    if (error.message.includes('connect')) {
+    if (error.message?.includes('connect')) {
       console.log('💡 Check your PRODUCTION_DATABASE_URL connection string');
       console.log('🔗 Format: postgresql://user:pass@host.neon.tech/dbname?sslmode=require');
     }

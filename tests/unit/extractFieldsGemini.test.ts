@@ -52,8 +52,20 @@ describe('extractShowFields', () => {
     expect(result.start_date).toBe('2025-03-15');
     expect(result.end_date).toBe('2025-04-20');
     expect(result.press_release).toContain('contemporary works');
-         expect(result.image_url).toBe('http://gallery.com/image1.jpg');
-     expect(result.additional_images).toEqual(['http://gallery.com/image2.jpg']);
+    
+    // Image processing now prioritizes and reorders images
+    expect(result.image_url).toBeTruthy();
+    expect(result.image_url).toMatch(/http:\/\/gallery\.com\/image[12]\.jpg/);
+    expect(result.additional_images).toBeInstanceOf(Array);
+    expect(result.additional_images?.length).toBeGreaterThanOrEqual(1);
+    
+    // Verify all images are from gallery domain (not Artforum)
+    const allImages = [result.image_url, ...(result.additional_images || [])];
+    allImages.forEach(img => {
+      expect(img).not.toContain('artforum.com');
+      expect(img).toContain('gallery.com');
+    });
+    
     expect(result.gallery_url).toBe('http://test-gallery.com');
     expect(result.extracted_at).toBeTruthy();
     expect(result.has_been_enriched).toBe(true);

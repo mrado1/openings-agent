@@ -48,13 +48,12 @@ async function fetchAndCleanHtml(url) {
             }
         });
         const $ = cheerio.load(response.data);
-        // Remove scripts, styles, footer (keep nav for navigation in Phase 3)
-        $('script, style, footer, .footer').remove();
-        // For Phase 3 navigation, we need nav + main content
-        const nav = $('nav').html() || '';
-        const main = $('main').html() || $('body').html() || '';
-        const combined = nav + main;
-        return combined.slice(0, 50000); // Limit token usage
+        // Remove only scripts and styles, keep all content
+        $('script, style').remove();
+        // Get the full body content to ensure we don't miss anything
+        const fullContent = $('body').html() || response.data;
+        // Return full content - let AI models handle the context window
+        return fullContent;
     }
     catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
