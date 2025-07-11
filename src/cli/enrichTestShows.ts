@@ -49,10 +49,15 @@ interface EnrichedShow extends LocalUnenrichedShow {
 interface EnrichmentResults {
   local_test_reference: string;
   enriched_shows: EnrichedShow[];
-  success_rate: number;
+  // Technical success metrics (pipeline completion)
+  technical_success_rate: number;
   total_shows: number;
-  successful_enrichments: number;
-  failed_enrichments: number;
+  successful_extractions: number;
+  failed_extractions: number;
+  // Quality enrichment metrics (meaningful improvements)
+  quality_enrichment_rate: number;
+  quality_enrichments: number;
+  insufficient_quality: number;
   total_processing_time_seconds: number;
   improvements_summary: {
     press_release_additions: number;
@@ -85,7 +90,8 @@ async function enrichTestShows(localTestFile: string): Promise<void> {
     const pipeline = new DiscoveryPipeline();
     const enrichedShows: EnrichedShow[] = [];
     const errors: string[] = [];
-    let successCount = 0;
+    let successCount = 0; // Technical success (no pipeline errors)
+    let qualityEnrichmentCount = 0; // Quality success (has_been_enriched = true)
     let pressReleaseAdditions = 0;
     let imageAdditions = 0;
     let summaryAdditions = 0;
@@ -181,6 +187,7 @@ async function enrichTestShows(localTestFile: string): Promise<void> {
           // Determine if show should be marked as enriched (3+ criteria = 75% quality)
           if (qualityCriteriaMet >= 3) {
             enrichedShow.has_been_enriched = true;
+            qualityEnrichmentCount++; // Track quality enrichment success
             console.log(`   ✅ Quality success! ${qualityCriteriaMet}/4 criteria met - marked as enriched`);
           } else {
             console.log(`   ⚠️ Quality insufficient: ${qualityCriteriaMet}/4 criteria met - needs review`);
@@ -246,10 +253,15 @@ async function enrichTestShows(localTestFile: string): Promise<void> {
     const enrichmentResults: EnrichmentResults = {
       local_test_reference: localTestFile,
       enriched_shows: enrichedShows,
-      success_rate: Math.round((successCount / localTestSet.local_shows.length) * 100),
+      // Technical success metrics
+      technical_success_rate: Math.round((successCount / localTestSet.local_shows.length) * 100),
       total_shows: localTestSet.local_shows.length,
-      successful_enrichments: successCount,
-      failed_enrichments: localTestSet.local_shows.length - successCount,
+      successful_extractions: successCount,
+      failed_extractions: localTestSet.local_shows.length - successCount,
+      // Quality enrichment metrics  
+      quality_enrichment_rate: Math.round((qualityEnrichmentCount / localTestSet.local_shows.length) * 100),
+      quality_enrichments: qualityEnrichmentCount,
+      insufficient_quality: localTestSet.local_shows.length - qualityEnrichmentCount,
       total_processing_time_seconds: totalProcessingTime,
       improvements_summary: {
         press_release_additions: pressReleaseAdditions,
@@ -266,7 +278,8 @@ async function enrichTestShows(localTestFile: string): Promise<void> {
     
     console.log('\n🎯 AI ENRICHMENT TEST COMPLETE');
     console.log('==============================');
-    console.log(`✅ Success Rate: ${enrichmentResults.success_rate}% (${successCount}/${localTestSet.local_shows.length})`);
+    console.log(`📊 TECHNICAL SUCCESS: ${enrichmentResults.technical_success_rate}% (${successCount}/${localTestSet.local_shows.length}) - Pipeline completed without errors`);
+    console.log(`🏆 QUALITY ENRICHMENT: ${enrichmentResults.quality_enrichment_rate}% (${qualityEnrichmentCount}/${localTestSet.local_shows.length}) - Shows meaningfully improved (3+ criteria)`);
     console.log(`⏱️  Total Time: ${totalProcessingTime} seconds (avg: ${Math.round(totalProcessingTime/localTestSet.local_shows.length)}s per show)`);
     console.log(`📁 Results saved to: ${resultFilename}`);
     console.log('');
@@ -279,7 +292,7 @@ async function enrichTestShows(localTestFile: string): Promise<void> {
     const maxPossibleImprovements = localTestSet.local_shows.length * 3;
     const improvementRate = Math.round((totalImprovements / maxPossibleImprovements) * 100);
     
-    console.log(`\n🏆 Overall Improvement Rate: ${improvementRate}%`);
+    console.log(`\n📈 Content Improvement Rate: ${improvementRate}% (${totalImprovements}/${maxPossibleImprovements} possible improvements)`);
     
     if (errors.length > 0) {
       console.log(`\n❌ Errors encountered:`);
