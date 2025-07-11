@@ -3,6 +3,105 @@ import { ShowData } from '../types/schemas';
 import { generateShowSummary } from '../services/summaryGenerationService';
 import { fetchAndCleanHtml } from '../utils/fetchHtml';
 
+// Phase 2: Enhanced Metadata Enums
+export enum ArtistMedium {
+  PAINTING = "painting",
+  SCULPTURE = "sculpture",
+  PHOTOGRAPHY = "photography",
+  DRAWING = "drawing",
+  PRINTS = "prints",
+  CERAMICS = "ceramics",
+  MIXED_MEDIA = "mixed_media",
+  INSTALLATION = "installation",
+  VIDEO = "video",
+  PERFORMANCE = "performance",
+  TEXTILE = "textile"
+}
+
+export enum ArtistCareerStage {
+  EMERGING = "emerging",
+  EARLY_CAREER = "early_career",
+  MID_CAREER = "mid_career",
+  ESTABLISHED = "established",
+  BLUE_CHIP = "blue_chip"
+}
+
+
+
+
+
+// Phase 2: Enhanced metadata extraction functions
+async function extractArtistMedium(pressRelease: string, title: string, artistName: string): Promise<ArtistMedium | null> {
+  if (!pressRelease || pressRelease.length < 50) {
+    return null; // Not enough content to analyze
+  }
+  
+  try {
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
+    const prompt = `Analyze this art exhibition information and classify the artist's primary medium.
+
+ARTIST: ${artistName}
+EXHIBITION TITLE: ${title}
+PRESS RELEASE: ${pressRelease}
+
+Based on the description, classify this artist's primary medium from these options:
+- painting (oil, acrylic, watercolor paintings)
+- sculpture (3D objects, installations requiring physical space)
+- photography (digital, film, mixed media photos)
+- drawing (pencil, charcoal, ink, works on paper)
+- prints (lithographs, etchings, screen prints)
+- ceramics (clay, pottery, fired ceramic objects)
+- mixed_media (collage, assemblage, multiple techniques)
+- installation (site-specific, immersive environments)
+- video (moving image, digital media)
+- performance (live art, time-based works)
+- textile (fabric, fiber art, wearable art)
+
+Return ONLY the medium keyword, or "unknown" if unclear.`;
+
+    const result = await model.generateContent(prompt);
+    const medium = result.response.text().trim().toLowerCase();
+    
+    // Validate against enum values
+    const validMediums = Object.values(ArtistMedium);
+    if (validMediums.includes(medium as ArtistMedium)) {
+      console.log(`🎨 Detected artist medium: ${medium} for ${artistName}`);
+      return medium as ArtistMedium;
+    }
+    
+    console.log(`⚠️ Could not determine medium for ${artistName} (got: ${medium})`);
+    return null;
+    
+  } catch (error) {
+    console.warn(`⚠️ Artist medium extraction failed: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
+
+
+interface EnhancedMetadata {
+  artistMedium: ArtistMedium | null;
+}
+
+async function extractEnhancedMetadata(
+  pressRelease: string,
+  title: string,
+  primaryArtist: string
+): Promise<EnhancedMetadata> {
+  
+  console.log(`🚀 Phase 2: Extracting enhanced metadata for "${title}" by ${primaryArtist}`);
+  
+  // Extract artist medium
+  const artistMedium = await extractArtistMedium(pressRelease, title, primaryArtist);
+  
+  return { 
+    artistMedium
+  };
+}
+
 /**
  * Clean any existing Artforum URLs from show data
  */
@@ -562,7 +661,10 @@ export async function agenticUrlDiscovery(
   }
 }
 
-export async function extractShowFields(html: string, galleryUrl: string): Promise<Partial<ShowData>> {
+export async function extractShowFields(
+  html: string, 
+  galleryUrl: string
+): Promise<Partial<ShowData & { artist_medium: ArtistMedium | null; show_url: string }>> {
   // Initialize genAI after environment is loaded
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
   const modelName = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
@@ -692,6 +794,13 @@ ${html}`;
         }
       }
       
+             // Phase 2: Extract enhanced metadata
+       const enhancedMetadata = await extractEnhancedMetadata(
+         parsed.press_release || '',
+         parsed.title || '',
+         parsed.artists?.[0] || ''
+       );
+
       return {
         ...parsed,
         // Override image fields with processed results
@@ -699,11 +808,13 @@ ${html}`;
         additional_images: processedImages.additional_images,
         // Add generated summary
         show_summary: generatedSummary,
-        // Standard metadata
-        gallery_url: galleryUrl,
-        extracted_at: new Date().toISOString(),
-        has_been_enriched: true,
-        source_url: galleryUrl
+                 // Add enhanced metadata
+         artist_medium: enhancedMetadata.artistMedium,
+         // Standard metadata - PHASE 2 FIX: show_url instead of gallery_url
+         show_url: galleryUrl, // Gallery exhibition URL discovered during enrichment
+         extracted_at: new Date().toISOString(),
+         has_been_enriched: true,
+         source_url: galleryUrl
       };
       
     } catch (error) {

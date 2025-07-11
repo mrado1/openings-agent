@@ -132,14 +132,15 @@ async function enrichTestShows(localTestFile: string): Promise<void> {
         const showStartTime = Date.now();
         
         try {
-          // Create search context
+          // Create search context with Phase 2 parameters
           const year = new Date(localShow.start_date).getFullYear().toString();
           const context: ShowSearchContext = {
             title: localShow.title || 'Untitled',
             artist: localShow.artist_names[0] || 'Unknown Artist',
             gallery: localShow.gallery_name,
             year: year,
-            gallery_website: localShow.gallery_website || undefined
+            gallery_website: localShow.gallery_website || undefined,
+
           };
           
           const aiResult = await pipeline.discoverAndExtract(context);
@@ -186,6 +187,15 @@ async function enrichTestShows(localTestFile: string): Promise<void> {
             if (aiData.show_summary && !originalHasSummary) {
               enrichedShow.show_summary = aiData.show_summary;
               console.log(`📝 ${showId} Added show summary`);
+            }
+            
+            // Phase 2: Log enhanced metadata extraction
+            if (aiData.artist_medium) {
+              console.log(`🎨 ${showId} Detected artist medium: ${aiData.artist_medium}`);
+            }
+            
+            if (aiData.show_url && !aiData.show_url.includes('artforum.com')) {
+              console.log(`🔗 ${showId} Gallery exhibition URL: ${aiData.show_url}`);
             }
             
             if (aiResult.discoveredUrl && !aiResult.discoveredUrl.includes('artforum.com')) {

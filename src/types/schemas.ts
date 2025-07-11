@@ -1,3 +1,6 @@
+// Phase 2: Enhanced Metadata Types
+import { ArtistMedium } from '../extractors/extractFieldsGemini';
+
 // Match existing Scene database structure
 export interface ShowData {
   title: string;
@@ -8,11 +11,14 @@ export interface ShowData {
   image_url: string;
   additional_images: string[]; // Up to 10 additional images
   show_summary: string; // 1-2 sentence summary
-  gallery_url: string;
+  // Phase 2 Fix: show_url instead of gallery_url (moved from ai_enrichment.discovered_url)
+  show_url: string; // Gallery exhibition URL discovered during enrichment
   extracted_at: string;
   // Enrichment tracking
   has_been_enriched: boolean;
   source_url: string;
+  // Phase 2: Enhanced metadata fields
+  artist_medium?: ArtistMedium | null;
 }
 
 export interface ExtractionResult {

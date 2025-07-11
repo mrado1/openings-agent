@@ -58,7 +58,10 @@ export class DiscoveryPipeline {
         // Extract show data using Phase 2 pipeline
         console.log(`📄 Extracting show data from agentic discovery...`);
         const html = await fetchAndCleanHtml(bestUrl);
-        const extractedData = await extractShowFields(html, bestUrl);
+        const extractedData = await extractShowFields(
+          html, 
+          bestUrl
+        );
         
         result.extractedData = {
           ...extractedData,
@@ -138,7 +141,10 @@ export class DiscoveryPipeline {
       // Extract show data using Phase 2 pipeline
       console.log(`📄 Extracting show data...`);
       const html = await fetchAndCleanHtml(bestUrl);
-      const extractedData = await extractShowFields(html, bestUrl);
+      const extractedData = await extractShowFields(
+        html, 
+        bestUrl
+      );
       
       result.extractedData = {
         ...extractedData,
