@@ -14,6 +14,55 @@ function cleanExistingArtforumImages(existingImageUrl?: string): string {
 }
 
 /**
+ * Normalize image URL parameters for consistent sizing
+ */
+function normalizeImageUrl(imageUrl: string, isPrimary: boolean = false): string {
+  try {
+    const url = new URL(imageUrl);
+    
+    // Standard sizes for mobile optimization
+    const primarySize = '1200'; // Primary image: good quality for iPhone display
+    const additionalSize = '800'; // Additional images: smaller for gallery performance
+    const targetSize = isPrimary ? primarySize : additionalSize;
+    
+    // Common image size parameters to normalize
+    const sizeParams = ['w', 'width', 'h', 'height', 'size', 's'];
+    
+    // Check if URL has any size parameters
+    let hasSizeParam = false;
+    sizeParams.forEach(param => {
+      if (url.searchParams.has(param)) {
+        hasSizeParam = true;
+        url.searchParams.set(param, targetSize);
+      }
+    });
+    
+    // If no existing size param but URL supports it (common CDN patterns)
+    if (!hasSizeParam) {
+      // Sanity CDN, Cloudinary, and other common CDNs use 'w' parameter
+      if (url.hostname.includes('sanity.io') || 
+          url.hostname.includes('cloudinary.com') ||
+          url.hostname.includes('cdn.') ||
+          url.pathname.includes('resize') ||
+          url.pathname.includes('transform')) {
+        url.searchParams.set('w', targetSize);
+      }
+    }
+    
+    const normalizedUrl = url.toString();
+    if (normalizedUrl !== imageUrl) {
+      console.log(`🔧 Normalized image size: ${imageUrl.split('?')[0]}?... → ?w=${targetSize}`);
+    }
+    
+    return normalizedUrl;
+    
+  } catch (error) {
+    console.warn(`⚠️ Could not normalize image URL: ${imageUrl}`);
+    return imageUrl; // Return original if normalization fails
+  }
+}
+
+/**
  * Process and validate extracted images according to mobile-first strategy
  */
 function processExtractedImages(
@@ -87,15 +136,16 @@ function processExtractedImages(
     return { image_url: '', additional_images: [] };
   }
   
-  // Score images for mobile-friendliness (prefer 16:9-ish aspect ratios)
+  // Score images separately for primary (portrait preferred) vs additional (landscape preferred)
   const scoredImages = validImages.map(imageUrl => {
-    let score = 0;
+    let portraitScore = 0; // Score for primary image (prefer portrait)
+    let landscapeScore = 0; // Score for additional images (prefer landscape)
     const url = new URL(imageUrl);
     
-    // Prefer images from same gallery domain
-    if (url.hostname.includes(galleryDomain.replace('www.', ''))) {
-      score += 10;
-    }
+    // Base scoring for both (prefer images from same gallery domain)
+    const baseScore = url.hostname.includes(galleryDomain.replace('www.', '')) ? 10 : 0;
+    portraitScore += baseScore;
+    landscapeScore += baseScore;
     
     // Prefer high-resolution indicators
     if (imageUrl.match(/\d{3,4}x\d{3,4}/)) { // Has resolution in URL like 1200x800
@@ -105,41 +155,82 @@ function processExtractedImages(
         const height = parseInt(match[2]);
         const aspectRatio = width / height;
         
-        // Prefer 16:9 (1.78) or similar mobile-friendly ratios (1.5-2.0)
-        if (aspectRatio >= 1.5 && aspectRatio <= 2.0) {
-          score += 8;
+        // PRIMARY IMAGE SCORING: Prefer portrait images for iPhone
+        if (aspectRatio >= 0.5 && aspectRatio <= 0.8) {
+          portraitScore += 12; // Strong preference for good portrait ratios (9:16 to 4:5)
+        } else if (aspectRatio > 0.8 && aspectRatio < 1.0) {
+          portraitScore += 8; // Moderate preference for slightly wider portraits
+        } else if (aspectRatio >= 1.0 && aspectRatio <= 1.3) {
+          portraitScore += 4; // Slight preference for square-ish images (fallback)
         }
-        // Prefer larger images
-        if (width >= 800) score += 5;
-        if (width >= 1200) score += 3;
+        // Landscape images (aspectRatio > 1.3) get no bonus for primary
+        
+        // ADDITIONAL IMAGES SCORING: Prefer landscape images for gallery viewing
+        if (aspectRatio >= 1.3 && aspectRatio <= 2.0) {
+          landscapeScore += 12; // Strong preference for good landscape ratios (4:3 to 16:9)
+        } else if (aspectRatio > 1.0 && aspectRatio < 1.3) {
+          landscapeScore += 8; // Moderate preference for slightly wider than square
+        } else if (aspectRatio >= 0.8 && aspectRatio <= 1.0) {
+          landscapeScore += 4; // Slight preference for square-ish images (fallback)
+        }
+        // Portrait images (aspectRatio < 0.8) get no bonus for additional
+        
+        // Common scoring: Prefer larger images
+        const sizeBonus = (width >= 1200) ? 3 : (width >= 800) ? 5 : 0;
+        portraitScore += sizeBonus;
+        landscapeScore += sizeBonus;
+        
+        // Log aspect ratio analysis for debugging
+        console.log(`📱 Image aspect analysis: ${width}x${height} = ${aspectRatio.toFixed(2)} (${aspectRatio < 1.0 ? 'portrait' : 'landscape'}) - Portrait score: ${portraitScore}, Landscape score: ${landscapeScore}`);
       }
     }
     
-    // Prefer certain file formats
-    if (imageUrl.includes('.webp')) score += 3;
-    if (imageUrl.includes('.jpg') || imageUrl.includes('.jpeg')) score += 2;
-    if (imageUrl.includes('.png')) score += 1;
+    // Common scoring: Prefer certain file formats
+    const formatBonus = imageUrl.includes('.webp') ? 3 : 
+                       (imageUrl.includes('.jpg') || imageUrl.includes('.jpeg')) ? 2 : 
+                       imageUrl.includes('.png') ? 1 : 0;
+    portraitScore += formatBonus;
+    landscapeScore += formatBonus;
     
-    // Prefer exhibition/artwork related paths
+    // Common scoring: Prefer exhibition/artwork related paths
     const exhibitionTerms = ['exhibition', 'show', 'artwork', 'installation', 'gallery', 'view'];
-    if (exhibitionTerms.some(term => imageUrl.toLowerCase().includes(term))) {
-      score += 5;
-    }
+    const exhibitionBonus = exhibitionTerms.some(term => imageUrl.toLowerCase().includes(term)) ? 5 : 0;
+    portraitScore += exhibitionBonus;
+    landscapeScore += exhibitionBonus;
     
-    return { url: imageUrl, score };
+    return { 
+      url: imageUrl, 
+      portraitScore, 
+      landscapeScore,
+      aspectRatio: imageUrl.match(/(\d{3,4})x(\d{3,4})/) ? 
+        parseInt(imageUrl.match(/(\d{3,4})x(\d{3,4})/)![1]) / parseInt(imageUrl.match(/(\d{3,4})x(\d{3,4})/)![2]) : 1.0
+    };
   });
   
-  // Sort by score (highest first)
-  scoredImages.sort((a, b) => b.score - a.score);
+  // Sort by portrait score for primary image selection
+  const portraitSorted = [...scoredImages].sort((a, b) => b.portraitScore - a.portraitScore);
   
-  console.log(`🖼️ Processed ${validImages.length} valid images, top score: ${scoredImages[0]?.score || 0}`);
+  // Sort by landscape score for additional images selection  
+  const landscapeSorted = [...scoredImages].sort((a, b) => b.landscapeScore - a.landscapeScore);
   
-  // Return best image as primary, rest as additional (limit to 5 additional for mobile performance)
-  const primaryImageUrl = scoredImages[0].url;
-  const additionalImageUrls = scoredImages.slice(1, 6).map(img => img.url);
+  console.log(`🖼️ Processed ${validImages.length} valid images`);
+  console.log(`📱 Best portrait image score: ${portraitSorted[0]?.portraitScore || 0} (aspect: ${portraitSorted[0]?.aspectRatio?.toFixed(2) || 'unknown'})`);
+  console.log(`🖥️ Best landscape image score: ${landscapeSorted[0]?.landscapeScore || 0} (aspect: ${landscapeSorted[0]?.aspectRatio?.toFixed(2) || 'unknown'})`);
   
-  console.log(`✅ Selected primary image: ${primaryImageUrl}`);
-  console.log(`✅ Selected ${additionalImageUrls.length} additional images`);
+  // Select primary image (best portrait score) and normalize for mobile
+  const rawPrimaryImageUrl = portraitSorted[0].url;
+  const primaryImageUrl = normalizeImageUrl(rawPrimaryImageUrl, true);
+  
+  // Select additional images (best landscape scores, excluding the primary) and normalize
+  const rawAdditionalImageUrls = landscapeSorted
+    .filter(img => img.url !== rawPrimaryImageUrl) // Don't duplicate primary image
+    .slice(0, 5) // Limit to 5 additional for mobile performance
+    .map(img => img.url);
+  
+  const additionalImageUrls = rawAdditionalImageUrls.map(url => normalizeImageUrl(url, false));
+  
+  console.log(`✅ Selected primary image (portrait): ${primaryImageUrl}`);
+  console.log(`✅ Selected ${additionalImageUrls.length} additional images (landscape preference)`);
   
   return {
     image_url: primaryImageUrl,
@@ -160,7 +251,8 @@ CRITICAL INSTRUCTIONS:
 2. PRESS RELEASE: Find the main exhibition description/statement, NOT gallery navigation or contact info. Look for artist statement, curatorial text, or exhibition overview.
 3. IMAGES: Extract high-resolution artwork images from THIS GALLERY WEBSITE ONLY
    - NEVER use artforum.com images
-   - Prefer images with mobile-friendly aspect ratios (16:9 or similar rectangular)
+   - For primary image: prefer PORTRAIT images (taller than wide) for iPhone main display
+   - For additional images: prefer LANDSCAPE images (wider than tall) for gallery viewing
    - Prefer high-resolution images (.jpg, .png, .webp formats)
    - Look for exhibition installation views, artwork details, or artist photos
    - Avoid gallery logos, navigation elements, or social media icons
@@ -183,7 +275,7 @@ IMPORTANT:
 - For images: ONLY extract images from this gallery's domain - NEVER include artforum.com URLs
 - Use empty string "" if field cannot be found (never null)
 - Ensure all URLs are complete and valid
-- Focus on finding high-quality exhibition images that work well on mobile devices
+- Focus on finding: portrait primary image (iPhone display) + landscape additional images (gallery viewing)
 
 HTML CONTENT:
 ${html}`;
