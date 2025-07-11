@@ -1,5 +1,10 @@
 // Phase 2: Enhanced Metadata Types
-import { ArtistMedium } from '../extractors/extractFieldsGemini';
+import { ArtistMedium, ArtistCareerStage } from '../extractors/extractFieldsGemini';
+
+export interface ArtistMetadata {
+  medium: ArtistMedium[] | null;
+  career_stage: ArtistCareerStage | null;
+}
 
 // Match existing Scene database structure
 export interface ShowData {
@@ -18,7 +23,7 @@ export interface ShowData {
   has_been_enriched: boolean;
   source_url: string;
   // Phase 2: Enhanced metadata fields
-  artist_medium?: ArtistMedium | null;
+  artist_metadata?: ArtistMetadata | null;
 }
 
 export interface ExtractionResult {

@@ -44,6 +44,8 @@ interface EnrichedShow extends LocalUnenrichedShow {
     enrichment_timestamp: string;
     errors: string[];
   };
+  // Phase 2: Enhanced metadata fields
+  artist_metadata?: any | null; // Artist metadata for separate database update
 }
 
 interface EnrichmentResults {
@@ -190,9 +192,20 @@ async function enrichTestShows(localTestFile: string): Promise<void> {
             }
             
             // Phase 2: Log enhanced metadata extraction
-            if (aiData.artist_medium) {
-              console.log(`🎨 ${showId} Detected artist medium: ${aiData.artist_medium}`);
+            if (aiData.artist_metadata) {
+              enrichedShow.artist_metadata = aiData.artist_metadata;
+              
+              // Log the metadata components
+              if (aiData.artist_metadata.medium) {
+                console.log(`🎨 ${showId} Detected artist medium: ${aiData.artist_metadata.medium.join(', ')}`);
+              }
+              
+              if (aiData.artist_metadata.career_stage) {
+                console.log(`👤 ${showId} Detected career stage: ${aiData.artist_metadata.career_stage}`);
+              }
             }
+            
+
             
             if (aiData.show_url && !aiData.show_url.includes('artforum.com')) {
               console.log(`🔗 ${showId} Gallery exhibition URL: ${aiData.show_url}`);

@@ -26,12 +26,17 @@ export enum ArtistCareerStage {
   BLUE_CHIP = "blue_chip"
 }
 
+export interface ArtistMetadata {
+  medium: ArtistMedium[] | null;
+  career_stage: ArtistCareerStage | null;
+}
 
-
-
+interface EnhancedMetadata {
+  artistMetadata: ArtistMetadata | null;
+}
 
 // Phase 2: Enhanced metadata extraction functions
-async function extractArtistMedium(pressRelease: string, title: string, artistName: string): Promise<ArtistMedium | null> {
+async function extractArtistMedium(pressRelease: string, title: string, artistName: string): Promise<ArtistMedium[] | null> {
   if (!pressRelease || pressRelease.length < 50) {
     return null; // Not enough content to analyze
   }
@@ -40,13 +45,13 @@ async function extractArtistMedium(pressRelease: string, title: string, artistNa
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
     const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
-    const prompt = `Analyze this art exhibition information and classify the artist's primary medium.
+    const prompt = `Analyze this art exhibition information and classify the artist's mediums. Artists often work in multiple mediums.
 
 ARTIST: ${artistName}
 EXHIBITION TITLE: ${title}
 PRESS RELEASE: ${pressRelease}
 
-Based on the description, classify this artist's primary medium from these options:
+Based on the description, classify this artist's mediums from these options:
 - painting (oil, acrylic, watercolor paintings)
 - sculpture (3D objects, installations requiring physical space)
 - photography (digital, film, mixed media photos)
@@ -59,19 +64,31 @@ Based on the description, classify this artist's primary medium from these optio
 - performance (live art, time-based works)
 - textile (fabric, fiber art, wearable art)
 
-Return ONLY the medium keyword, or "unknown" if unclear.`;
+Return a comma-separated list of applicable mediums, or "unknown" if unclear.
+Examples: 
+- "painting" (single medium)
+- "sculpture, installation" (multiple mediums)
+- "mixed_media, photography" (multiple mediums)`;
 
     const result = await model.generateContent(prompt);
-    const medium = result.response.text().trim().toLowerCase();
+    const response = result.response.text().trim().toLowerCase();
     
-    // Validate against enum values
-    const validMediums = Object.values(ArtistMedium);
-    if (validMediums.includes(medium as ArtistMedium)) {
-      console.log(`🎨 Detected artist medium: ${medium} for ${artistName}`);
-      return medium as ArtistMedium;
+    if (response === 'unknown') {
+      console.log(`⚠️ Could not determine medium for ${artistName}`);
+      return null;
     }
     
-    console.log(`⚠️ Could not determine medium for ${artistName} (got: ${medium})`);
+    // Parse comma-separated mediums
+    const mediums = response.split(',').map(m => m.trim()).filter(m => m.length > 0);
+    const validMediums = Object.values(ArtistMedium);
+    const filteredMediums = mediums.filter(medium => validMediums.includes(medium as ArtistMedium));
+    
+    if (filteredMediums.length > 0) {
+      console.log(`🎨 Detected artist mediums: ${filteredMediums.join(', ')} for ${artistName}`);
+      return filteredMediums as ArtistMedium[];
+    }
+    
+    console.log(`⚠️ Could not determine valid mediums for ${artistName} (got: ${response})`);
     return null;
     
   } catch (error) {
@@ -80,25 +97,82 @@ Return ONLY the medium keyword, or "unknown" if unclear.`;
   }
 }
 
+async function extractArtistCareerStage(
+  artistName: string, 
+  pressRelease: string, 
+  galleryWebsite?: string
+): Promise<ArtistCareerStage | null> {
+  if (!pressRelease || pressRelease.length < 50) {
+    return null; // Not enough content to analyze
+  }
+  
+  try {
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
+    const prompt = `Analyze this art exhibition information and classify the artist's career stage.
 
-interface EnhancedMetadata {
-  artistMedium: ArtistMedium | null;
+ARTIST: ${artistName}
+PRESS RELEASE: ${pressRelease}
+${galleryWebsite ? `GALLERY WEBSITE: ${galleryWebsite}` : ''}
+
+Based on the description, classify this artist's career stage from these options:
+- emerging: Recent graduates, first gallery shows, under 5 years professional
+- early_career: 2-8 years active, building recognition, group shows, regional galleries  
+- mid_career: 8-20 years, established regional presence, solo shows, museum group shows
+- established: 20+ years, major institutions, museum solo shows, art fair representation
+- blue_chip: Top galleries (Gagosian, Pace, etc.), major auctions, museum collections
+
+Look for indicators like:
+- Years active, graduation dates, first shows
+- Gallery prestige level and exhibition history
+- Museum exhibitions, collections, awards
+- Market presence, auction records
+- Critical recognition, publications
+
+Return ONLY the career stage keyword, or "unknown" if unclear.`;
+
+    const result = await model.generateContent(prompt);
+    const stage = result.response.text().trim().toLowerCase();
+    
+    // Validate against enum values
+    const validStages = Object.values(ArtistCareerStage);
+    if (validStages.includes(stage as ArtistCareerStage)) {
+      console.log(`👤 Detected career stage: ${stage} for ${artistName}`);
+      return stage as ArtistCareerStage;
+    }
+    
+    console.log(`⚠️ Could not determine career stage for ${artistName} (got: ${stage})`);
+    return null;
+    
+  } catch (error) {
+    console.warn(`⚠️ Artist career stage extraction failed: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
 }
 
 async function extractEnhancedMetadata(
   pressRelease: string,
   title: string,
-  primaryArtist: string
+  primaryArtist: string,
+  galleryWebsite?: string
 ): Promise<EnhancedMetadata> {
   
   console.log(`🚀 Phase 2: Extracting enhanced metadata for "${title}" by ${primaryArtist}`);
   
-  // Extract artist medium
-  const artistMedium = await extractArtistMedium(pressRelease, title, primaryArtist);
+  // Extract artist metadata in parallel for efficiency
+  const [artistMedium, careerStage] = await Promise.all([
+    extractArtistMedium(pressRelease, title, primaryArtist),
+    extractArtistCareerStage(primaryArtist, pressRelease, galleryWebsite)
+  ]);
+  
+  const artistMetadata: ArtistMetadata | null = (artistMedium || careerStage) ? {
+    medium: artistMedium,
+    career_stage: careerStage
+  } : null;
   
   return { 
-    artistMedium
+    artistMetadata
   };
 }
 
@@ -664,7 +738,7 @@ export async function agenticUrlDiscovery(
 export async function extractShowFields(
   html: string, 
   galleryUrl: string
-): Promise<Partial<ShowData & { artist_medium: ArtistMedium | null; show_url: string }>> {
+): Promise<Partial<ShowData & { artist_metadata: ArtistMetadata | null; show_url: string }>> {
   // Initialize genAI after environment is loaded
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
   const modelName = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
@@ -798,7 +872,8 @@ ${html}`;
        const enhancedMetadata = await extractEnhancedMetadata(
          parsed.press_release || '',
          parsed.title || '',
-         parsed.artists?.[0] || ''
+         parsed.artists?.[0] || '',
+         galleryUrl // Pass galleryWebsite for career stage extraction
        );
 
       return {
@@ -809,7 +884,7 @@ ${html}`;
         // Add generated summary
         show_summary: generatedSummary,
                  // Add enhanced metadata
-         artist_medium: enhancedMetadata.artistMedium,
+         artist_metadata: enhancedMetadata.artistMetadata,
          // Standard metadata - PHASE 2 FIX: show_url instead of gallery_url
          show_url: galleryUrl, // Gallery exhibition URL discovered during enrichment
          extracted_at: new Date().toISOString(),
