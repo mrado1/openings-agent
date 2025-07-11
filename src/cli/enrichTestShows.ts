@@ -98,152 +98,170 @@ async function enrichTestShows(localTestFile: string): Promise<void> {
     
     const startTime = Date.now();
     
-    // Process each show
-    for (let i = 0; i < localTestSet.local_shows.length; i++) {
-      const localShow = localTestSet.local_shows[i];
-      console.log(`\n🔬 [${i + 1}/${localTestSet.local_shows.length}] Enriching: "${localShow.title}"`);
-      console.log(`   Artist: ${localShow.artist_names.join(', ')}`);
-      console.log(`   Gallery: ${localShow.gallery_name}`);
+    // Process shows in parallel batches for speed while respecting API rate limits
+    const BATCH_SIZE = 5; // Process 5 shows concurrently
+    const BATCH_DELAY = 3000; // 3 second delay between batches
+    
+    const batches = [];
+    for (let i = 0; i < localTestSet.local_shows.length; i += BATCH_SIZE) {
+      batches.push(localTestSet.local_shows.slice(i, i + BATCH_SIZE));
+    }
+    
+    console.log(`🚀 Processing ${localTestSet.local_shows.length} shows in ${batches.length} parallel batches of ${BATCH_SIZE}`);
+    console.log(`⏱️  Estimated time: ~${Math.round((batches.length * 70) / 60)} minutes (${batches.length} batches × ~70s avg per batch)`);
+    console.log('');
+    
+    let processedCount = 0;
+    
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
+      console.log(`\n📦 BATCH ${batchIndex + 1}/${batches.length} - Processing ${batch.length} shows in parallel...`);
       
-      // Analyze current data state
-      const originalPressReleaseLength = localShow.press_release?.length || 0;
-      const originalImageCount = localShow.image_url ? 1 : 0; // Artforum only has 1 preview image
-      const originalHasSummary = !!localShow.show_summary;
-      
-      console.log(`   Current: PR=${originalPressReleaseLength} chars, Images=${originalImageCount}, Summary=${originalHasSummary}`);
-      
-      const showStartTime = Date.now();
-      
-      try {
-        // Create search context
-        const year = new Date(localShow.start_date).getFullYear().toString();
-        const context: ShowSearchContext = {
-          title: localShow.title || 'Untitled',
-          artist: localShow.artist_names[0] || 'Unknown Artist',
-          gallery: localShow.gallery_name,
-          year: year,
-          gallery_website: localShow.gallery_website || undefined
-        };
+      // Process all shows in this batch concurrently
+      const batchPromises = batch.map(async (localShow, indexInBatch) => {
+        const globalIndex = processedCount + indexInBatch;
+        const showId = `[${globalIndex + 1}/${localTestSet.local_shows.length}]`;
         
-        console.log(`   🚀 Running AI discovery pipeline...`);
-        const aiResult = await pipeline.discoverAndExtract(context);
-        const processingTime = Math.round((Date.now() - showStartTime) / 1000);
+        console.log(`🔬 ${showId} Starting: "${localShow.title}" by ${localShow.artist_names.join(', ')}`);
         
-        // Create enriched show object
-        const enrichedShow: EnrichedShow = {
-          ...localShow,
-          ai_enrichment: {
-            success: aiResult.success,
-            confidence: aiResult.confidence || 0,
-            discovered_url: aiResult.discoveredUrl,
-            processing_time_seconds: processingTime,
-            quality_criteria_met: 0, // Will be calculated based on criteria
-            enrichment_timestamp: new Date().toISOString(),
-            errors: aiResult.errors || []
-          }
-        };
+        // Analyze current data state
+        const originalPressReleaseLength = localShow.press_release?.length || 0;
+        const originalImageCount = localShow.image_url ? 1 : 0;
+        const originalHasSummary = !!localShow.show_summary;
         
-        // Analyze improvements if successful
-        if (aiResult.success && aiResult.extractedData) {
-          const aiData = aiResult.extractedData;
-          let qualityCriteriaMet = 0;
+        const showStartTime = Date.now();
+        
+        try {
+          // Create search context
+          const year = new Date(localShow.start_date).getFullYear().toString();
+          const context: ShowSearchContext = {
+            title: localShow.title || 'Untitled',
+            artist: localShow.artist_names[0] || 'Unknown Artist',
+            gallery: localShow.gallery_name,
+            year: year,
+            gallery_website: localShow.gallery_website || undefined
+          };
           
-          // CRITICAL FIX: Update main show fields with AI-extracted data
-          // 1. Replace Artforum image_url with gallery image_url if found
-          if (aiData.image_url && !aiData.image_url.includes('artforum.com')) {
-            enrichedShow.image_url = aiData.image_url;
-            qualityCriteriaMet++; // Main image replaced criterion
-            console.log(`   🖼️ Replaced main image: ${localShow.image_url} → ${aiData.image_url}`);
-          }
+          const aiResult = await pipeline.discoverAndExtract(context);
+          const processingTime = Math.round((Date.now() - showStartTime) / 1000);
           
-          // 2. Update additional_images if AI found better images
-          if (aiData.additional_images && aiData.additional_images.length > 0) {
-            enrichedShow.additional_images = aiData.additional_images;
-            qualityCriteriaMet++; // Additional images found criterion
-            console.log(`   📸 Updated additional images: ${aiData.additional_images.length} images`);
-          }
+          // Create enriched show object
+          const enrichedShow: EnrichedShow = {
+            ...localShow,
+            ai_enrichment: {
+              success: aiResult.success,
+              confidence: aiResult.confidence || 0,
+              discovered_url: aiResult.discoveredUrl,
+              processing_time_seconds: processingTime,
+              quality_criteria_met: 0,
+              enrichment_timestamp: new Date().toISOString(),
+              errors: aiResult.errors || []
+            }
+          };
           
-          // 3. Update press_release if AI found better content
-          if (aiData.press_release && aiData.press_release.length > originalPressReleaseLength) {
-            enrichedShow.press_release = aiData.press_release;
-            qualityCriteriaMet++; // Press release found criterion
-            console.log(`   📄 Updated press release: ${originalPressReleaseLength} → ${aiData.press_release.length} chars`);
-          }
-          
-          // 4. Update show_summary if AI generated one
-          if (aiData.show_summary && !originalHasSummary) {
-            enrichedShow.show_summary = aiData.show_summary;
-            console.log(`   📝 Added show summary`);
-          }
-          
-          // 5. Accurate URL found criterion (gallery URL, not Artforum)
-          if (aiResult.discoveredUrl && !aiResult.discoveredUrl.includes('artforum.com')) {
-            qualityCriteriaMet++; // Accurate URL found criterion
-          }
-          
-          // Update quality criteria count
-          enrichedShow.ai_enrichment.quality_criteria_met = qualityCriteriaMet;
-          
-          // Determine if show should be marked as enriched (3+ criteria = 75% quality)
-          if (qualityCriteriaMet >= 3) {
-            enrichedShow.has_been_enriched = true;
-            qualityEnrichmentCount++; // Track quality enrichment success
-            console.log(`   ✅ Quality success! ${qualityCriteriaMet}/4 criteria met - marked as enriched`);
+          // Analyze improvements if successful
+          if (aiResult.success && aiResult.extractedData) {
+            const aiData = aiResult.extractedData;
+            let qualityCriteriaMet = 0;
+            
+            // Update main show fields with AI-extracted data
+            if (aiData.image_url && !aiData.image_url.includes('artforum.com')) {
+              enrichedShow.image_url = aiData.image_url;
+              qualityCriteriaMet++;
+              console.log(`🖼️ ${showId} Replaced main image`);
+            }
+            
+            if (aiData.additional_images && aiData.additional_images.length > 0) {
+              enrichedShow.additional_images = aiData.additional_images;
+              qualityCriteriaMet++;
+              console.log(`📸 ${showId} Added ${aiData.additional_images.length} additional images`);
+            }
+            
+            if (aiData.press_release && aiData.press_release.length > originalPressReleaseLength) {
+              enrichedShow.press_release = aiData.press_release;
+              qualityCriteriaMet++;
+              console.log(`📄 ${showId} Updated press release (${originalPressReleaseLength} → ${aiData.press_release.length} chars)`);
+            }
+            
+            if (aiData.show_summary && !originalHasSummary) {
+              enrichedShow.show_summary = aiData.show_summary;
+              console.log(`📝 ${showId} Added show summary`);
+            }
+            
+            if (aiResult.discoveredUrl && !aiResult.discoveredUrl.includes('artforum.com')) {
+              qualityCriteriaMet++;
+            }
+            
+            enrichedShow.ai_enrichment.quality_criteria_met = qualityCriteriaMet;
+            
+            // Mark as enriched if 3+ criteria met
+            if (qualityCriteriaMet >= 3) {
+              enrichedShow.has_been_enriched = true;
+              console.log(`✅ ${showId} Quality success! ${qualityCriteriaMet}/4 criteria - marked enriched (${processingTime}s)`);
+              return { enrichedShow, success: true, qualitySuccess: true, improvements: { pressRelease: aiData.press_release && aiData.press_release.length > originalPressReleaseLength, images: aiData.additional_images && aiData.additional_images.length > 0, summary: aiData.show_summary && !originalHasSummary } };
+            } else {
+              console.log(`⚠️ ${showId} Quality insufficient: ${qualityCriteriaMet}/4 criteria (${processingTime}s)`);
+              return { enrichedShow, success: true, qualitySuccess: false, improvements: { pressRelease: aiData.press_release && aiData.press_release.length > originalPressReleaseLength, images: aiData.additional_images && aiData.additional_images.length > 0, summary: aiData.show_summary && !originalHasSummary } };
+            }
+            
           } else {
-            console.log(`   ⚠️ Quality insufficient: ${qualityCriteriaMet}/4 criteria met - needs review`);
+            console.log(`❌ ${showId} Failed: ${aiResult.errors?.join(', ') || 'Unknown error'} (${processingTime}s)`);
+            return { enrichedShow, success: false, qualitySuccess: false, error: aiResult.errors?.join(', ') || 'Unknown error', improvements: { pressRelease: false, images: false, summary: false } };
           }
           
-          // Count improvements for summary (track what actually was improved)
-          if (aiData.press_release && aiData.press_release.length > originalPressReleaseLength) {
-            pressReleaseAdditions++;
-          }
-          if (aiData.additional_images && aiData.additional_images.length > 0) {
-            imageAdditions++;
-          }
-          if (aiData.show_summary && !originalHasSummary) {
-            summaryAdditions++;
-          }
+        } catch (error: any) {
+          const processingTime = Math.round((Date.now() - showStartTime) / 1000);
+          console.log(`💥 ${showId} Error: ${error.message} (${processingTime}s)`);
           
-          successCount++;
+          const failedShow: EnrichedShow = {
+            ...localShow,
+            ai_enrichment: {
+              success: false,
+              confidence: 0,
+              processing_time_seconds: processingTime,
+              quality_criteria_met: 0,
+              enrichment_timestamp: new Date().toISOString(),
+              errors: [error.message]
+            }
+          };
           
-          console.log(`   ✅ Success! Confidence: ${aiResult.confidence}%`);
-          console.log(`   🌐 Found URL: ${aiResult.discoveredUrl}`);
-          console.log(`   📊 Quality score: ${qualityCriteriaMet}/4 criteria met`);
-          console.log(`   ➕ Improvements: ${qualityCriteriaMet} criteria met`);
-          console.log(`   ⏱️  Processing time: ${processingTime}s`);
-          
-        } else {
-          console.log(`   ❌ Failed: ${aiResult.errors?.join(', ') || 'Unknown error'}`);
-          errors.push(`Show ${i + 1} (${localShow.title}): ${aiResult.errors?.join(', ') || 'Unknown error'}`);
+          return { enrichedShow: failedShow, success: false, qualitySuccess: false, error: error.message, improvements: { pressRelease: false, images: false, summary: false } };
         }
-        
-        enrichedShows.push(enrichedShow);
-        
-      } catch (error: any) {
-        const processingTime = Math.round((Date.now() - showStartTime) / 1000);
-        console.log(`   💥 Error: ${error.message}`);
-        errors.push(`Show ${i + 1} (${localShow.title}): ${error.message}`);
-        
-        // Add failed enrichment entry
-        const failedShow: EnrichedShow = {
-          ...localShow,
-          ai_enrichment: {
-            success: false,
-            confidence: 0,
-            processing_time_seconds: processingTime,
-            quality_criteria_met: 0,
-            enrichment_timestamp: new Date().toISOString(),
-            errors: [error.message]
-          }
-        };
-        
-        enrichedShows.push(failedShow);
-      }
+      });
       
-      // Wait between requests
-      if (i < localTestSet.local_shows.length - 1) {
-        console.log(`   ⏳ Waiting 2 seconds before next enrichment...`);
-        await new Promise(resolve => setTimeout(resolve, 2000));
+      // Wait for all shows in this batch to complete
+      const batchResults = await Promise.all(batchPromises);
+      
+      // Process batch results
+      batchResults.forEach(result => {
+        enrichedShows.push(result.enrichedShow);
+        
+        if (result.success) {
+          successCount++;
+          if (result.qualitySuccess) {
+            qualityEnrichmentCount++;
+          }
+          
+          // Count improvements
+          if (result.improvements.pressRelease) pressReleaseAdditions++;
+          if (result.improvements.images) imageAdditions++;
+          if (result.improvements.summary) summaryAdditions++;
+        } else {
+          errors.push(`Show ${processedCount + 1}: ${result.error}`);
+        }
+      });
+      
+      processedCount += batch.length;
+      
+      // Progress update
+      const batchTime = Math.max(...batchResults.map(r => r.enrichedShow.ai_enrichment.processing_time_seconds));
+      const qualityInBatch = batchResults.filter(r => r.qualitySuccess).length;
+      console.log(`📊 Batch ${batchIndex + 1} complete: ${batchResults.filter(r => r.success).length}/${batch.length} technical success, ${qualityInBatch}/${batch.length} quality success (${batchTime}s max)`);
+      
+      // Delay between batches (except for the last one)
+      if (batchIndex < batches.length - 1) {
+        console.log(`⏳ Waiting ${BATCH_DELAY/1000}s before next batch...`);
+        await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
       }
     }
     
