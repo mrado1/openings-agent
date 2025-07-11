@@ -110,7 +110,7 @@ async function queryProductionEnriched(localTestFile: string): Promise<void> {
   console.log(`🌐 Production API: ${PRODUCTION_API_URL}`);
 
   // Load local test set to get IDs
-  const localTestPath = path.join('outputs', localTestFile);
+  const localTestPath = localTestFile.startsWith('outputs/') ? localTestFile : path.join('outputs', localTestFile);
   if (!fs.existsSync(localTestPath)) {
     throw new Error(`Local test set file not found: ${localTestPath}`);
   }

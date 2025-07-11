@@ -2,7 +2,7 @@ import { WebSearchService } from '../services/webSearchService';
 import { UrlFilterService } from '../services/urlFilterService';
 import { LinkSelectionService } from '../services/linkSelectionService';
 import { SearchQueryBuilder, ShowSearchContext } from './searchQueryBuilder';
-import { extractShowFields } from '../extractors/extractFieldsGemini';
+import { extractShowFields, agenticUrlDiscovery } from '../extractors/extractFieldsGemini';
 import { fetchAndCleanHtml } from '../utils/fetchHtml';
 
 export interface DiscoveryResult {
@@ -40,13 +40,46 @@ export class DiscoveryPipeline {
     };
 
     try {
-      console.log(`🚀 Starting discovery pipeline for: "${context.title}" by ${context.artist}`);
+      console.log(`🚀 Starting agentic discovery pipeline for: "${context.title}" by ${context.artist}`);
+      
+      // STEP 1: Try agentic URL discovery first (new multi-step approach)
+      console.log(`🤖 Attempting agentic URL discovery...`);
+      let bestUrl = await agenticUrlDiscovery(
+        context.title, 
+        [context.artist], 
+        context.gallery_website || undefined
+      );
+      
+      // STEP 2: If agentic discovery found a URL, validate and extract
+      if (bestUrl) {
+        console.log(`✅ Agentic discovery found URL: ${bestUrl}`);
+        result.discoveredUrl = bestUrl;
+        
+        // Extract show data using Phase 2 pipeline
+        console.log(`📄 Extracting show data from agentic discovery...`);
+        const html = await fetchAndCleanHtml(bestUrl);
+        const extractedData = await extractShowFields(html, bestUrl);
+        
+        result.extractedData = {
+          ...extractedData,
+          extracted_at: new Date().toISOString(),
+          has_been_enriched: true,
+          source_url: bestUrl
+        };
+        
+        result.success = true;
+        result.confidence = this.calculateOverallConfidence(context, extractedData);
+        
+        console.log(`✅ Agentic discovery completed with ${result.confidence}% confidence`);
+        return result;
+      }
+      
+      // STEP 3: Fallback to existing Google search approach
+      console.log(`⚠️ Agentic discovery failed, falling back to Google search...`);
       
       // Generate search queries with fallback strategies
       const queries = this.queryBuilder.buildSearchQueries(context);
       result.searchQueries = queries;
-
-      let bestUrl: string | null = null;
       
       // Try each query until we find a good result
       for (const query of queries) {
@@ -60,9 +93,12 @@ export class DiscoveryPipeline {
           continue;
         }
         
+        // Special handling for arthap.com URLs - extract gallery website
+        const processedResults = await this.processSearchResults(searchResults, context);
+        
         // Filter for gallery URLs with expected gallery website prioritization
         const expectedWebsite = context.gallery_website || undefined;
-        const filteredUrls = this.urlFilter.filterGalleryUrls(searchResults, expectedWebsite);
+        const filteredUrls = this.urlFilter.filterGalleryUrls(processedResults, expectedWebsite);
         result.urlsFiltered += filteredUrls.length;
         
         if (filteredUrls.length === 0) {
@@ -132,6 +168,54 @@ export class DiscoveryPipeline {
       
       return result;
     }
+  }
+
+  /**
+   * Process search results with special handling for arthap.com and other special cases
+   */
+  private async processSearchResults(searchResults: any[], context: ShowSearchContext): Promise<any[]> {
+    const processedResults = [];
+    
+    for (const result of searchResults) {
+             // Special handling for arthap.com URLs
+       if (result.link && result.link.includes('arthap.com')) {
+         console.log(`🔗 Found arthap.com URL, attempting to extract gallery links: ${result.link}`);
+         
+         try {
+           // Import the function locally to avoid circular dependency
+           const { extractArthapLinks } = await import('../extractors/extractFieldsGemini');
+           const extractedLinks = await extractArthapLinks(result.link);
+           
+           // If we found a gallery website, update context for better filtering
+           if (extractedLinks.galleryWebsite && !context.gallery_website) {
+             console.log(`🔗 Extracted gallery website from arthap: ${extractedLinks.galleryWebsite}`);
+             context.gallery_website = extractedLinks.galleryWebsite;
+           }
+           
+           // If we found a direct event URL, add it as a high-priority result
+           if (extractedLinks.eventUrl) {
+             console.log(`🎯 Found direct event URL from arthap: ${extractedLinks.eventUrl}`);
+             processedResults.push({
+               ...result,
+               link: extractedLinks.eventUrl,
+               title: `${result.title} (Direct Event Link)`,
+               confidence: 0.95 // High confidence for direct links
+             });
+           }
+          
+          // Keep the original arthap URL as fallback
+          processedResults.push(result);
+          
+        } catch (error) {
+          console.warn(`⚠️ Failed to process arthap.com URL: ${error instanceof Error ? error.message : String(error)}`);
+          processedResults.push(result);
+        }
+      } else {
+        processedResults.push(result);
+      }
+    }
+    
+    return processedResults;
   }
 
   private calculateOverallConfidence(context: ShowSearchContext, extracted: any): number {

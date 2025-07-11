@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { ShowData } from '../types/schemas';
 import { generateShowSummary } from '../services/summaryGenerationService';
+import { fetchAndCleanHtml } from '../utils/fetchHtml';
 
 /**
  * Clean any existing Artforum URLs from show data
@@ -238,6 +239,329 @@ function processExtractedImages(
   };
 }
 
+/**
+ * Search directly on gallery website for specific show page
+ */
+async function searchGalleryWebsiteForShow(
+  galleryWebsite: string, 
+  showTitle: string, 
+  artistNames: string[]
+): Promise<string | null> {
+  try {
+    console.log(`🔍 Primary search: Looking for "${showTitle}" on ${galleryWebsite}...`);
+    
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    
+    // Fetch the gallery homepage first
+    const galleryBaseUrl = galleryWebsite.startsWith('http') ? galleryWebsite : `https://${galleryWebsite}`;
+    const html = await fetchAndCleanHtml(galleryBaseUrl);
+    
+    const searchPrompt = `You are searching a gallery website for a specific art exhibition page.
+
+GALLERY WEBSITE: ${galleryWebsite}
+EXHIBITION: "${showTitle}" by ${artistNames.join(', ')}
+
+TASK: Find the URL for this specific exhibition on this gallery's website.
+
+Look through this HTML for:
+1. Navigation menus with "exhibitions", "shows", "current", "upcoming"
+2. Direct links to exhibitions matching the title "${showTitle}"
+3. Artist pages that might link to the exhibition
+4. Exhibition archive or listing pages
+
+Return ONLY the most relevant URL path or full URL for this specific exhibition.
+If multiple URLs seem relevant, return the most specific exhibition page.
+If no relevant exhibition URL is found, return "NOT_FOUND".
+
+HTML CONTENT:
+${html.substring(0, 50000)} // Limit to avoid token limits
+
+URL:`;
+
+    const result = await model.generateContent(searchPrompt);
+    const suggestedUrl = result.response.text().trim();
+    
+    if (suggestedUrl === 'NOT_FOUND' || !suggestedUrl || suggestedUrl.length < 5) {
+      console.log(`❌ No exhibition URL found on ${galleryWebsite}`);
+      return null;
+    }
+    
+    // Convert relative URLs to absolute
+    let fullUrl = suggestedUrl;
+    if (suggestedUrl.startsWith('/')) {
+      const base = new URL(galleryBaseUrl);
+      fullUrl = `${base.origin}${suggestedUrl}`;
+    } else if (!suggestedUrl.startsWith('http')) {
+      fullUrl = `${galleryBaseUrl.replace(/\/$/, '')}/${suggestedUrl}`;
+    }
+    
+    console.log(`✅ Found exhibition URL on gallery website: ${fullUrl}`);
+    return fullUrl;
+    
+  } catch (error) {
+    console.warn(`⚠️ Gallery website search failed: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
+/**
+ * Extract gallery website and event links from arthap.com pages
+ */
+async function extractArthapLinks(arthapUrl: string): Promise<{ galleryWebsite?: string; eventUrl?: string }> {
+  try {
+    console.log(`🔗 Extracting links from arthap.com page: ${arthapUrl}`);
+    
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    
+    const html = await fetchAndCleanHtml(arthapUrl);
+    
+    const extractPrompt = `Extract gallery website and event links from this arthap.com page.
+
+TASK: Find these specific links:
+1. Gallery website URL (official gallery domain, not arthap.com)
+2. Event/exhibition URL (direct link to the show page on gallery website)
+
+Look for:
+- Links to the gallery's official website
+- Direct links to the exhibition page
+- Contact information with gallery website
+- "Visit Gallery" or "Gallery Website" links
+
+Return JSON format:
+{
+  "galleryWebsite": "gallery-domain.com or full URL",
+  "eventUrl": "direct exhibition URL if found"
+}
+
+Return empty strings for fields not found. Do not include arthap.com URLs.
+
+HTML CONTENT:
+${html.substring(0, 30000)}
+
+JSON:`;
+
+    const result = await model.generateContent(extractPrompt);
+    const jsonStr = result.response.text().replace(/```json|```/g, '').trim();
+    const extracted = JSON.parse(jsonStr);
+    
+    console.log(`🔗 Extracted from arthap.com: gallery=${extracted.galleryWebsite || 'none'}, event=${extracted.eventUrl || 'none'}`);
+    return extracted;
+    
+  } catch (error) {
+    console.warn(`⚠️ Failed to extract links from arthap.com: ${error instanceof Error ? error.message : String(error)}`);
+    return {};
+  }
+}
+
+/**
+ * Validate if a URL has good content for enrichment
+ */
+async function validateUrlContent(url: string, showTitle: string): Promise<{ hasGoodContent: boolean; contentSummary: string }> {
+  try {
+    console.log(`🔍 Validating content quality of: ${url}`);
+    
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    
+    const html = await fetchAndCleanHtml(url);
+    
+    const validationPrompt = `Evaluate if this webpage has good content for art exhibition enrichment.
+
+EXHIBITION: "${showTitle}"
+URL: ${url}
+
+EVALUATION CRITERIA:
+1. Has exhibition description, press release, or artist statement?
+2. Contains high-quality artwork images?
+3. Has exhibition details (dates, artists, etc.)?
+4. Is this actually about the exhibition (not just gallery homepage)?
+
+Return JSON:
+{
+  "hasGoodContent": true/false,
+  "contentSummary": "brief description of what content is available"
+}
+
+Consider content GOOD if it has press release OR good images OR detailed exhibition info.
+Consider content POOR if it's just a basic listing, contact page, or unrelated content.
+
+HTML CONTENT:
+${html.substring(0, 30000)}
+
+JSON:`;
+
+    const result = await model.generateContent(validationPrompt);
+    const jsonStr = result.response.text().replace(/```json|```/g, '').trim();
+    const validation = JSON.parse(jsonStr);
+    
+    console.log(`📋 Content validation: ${validation.hasGoodContent ? '✅ Good' : '❌ Poor'} - ${validation.contentSummary}`);
+    return validation;
+    
+  } catch (error) {
+    console.warn(`⚠️ Content validation failed: ${error instanceof Error ? error.message : String(error)}`);
+    return { hasGoodContent: false, contentSummary: 'Validation failed' };
+  }
+}
+
+/**
+ * Find alternative URLs on a page (like "Selected Works" or "Artworks" pages)
+ */
+async function findAlternativeUrls(url: string, showTitle: string): Promise<string[]> {
+  try {
+    console.log(`🔗 Looking for alternative URLs on: ${url}`);
+    
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    
+    const html = await fetchAndCleanHtml(url);
+    
+    const alternativePrompt = `Find alternative relevant URLs on this exhibition page.
+
+EXHIBITION: "${showTitle}"
+CURRENT URL: ${url}
+
+Look for links to:
+1. "Selected Works", "Artworks", "Images", "Gallery", "Installation Views"
+2. "Press Release", "Exhibition Details", "About the Show"
+3. "Artist Works", "Exhibition Images", "View Works"
+4. Any sub-pages that might have more content about this exhibition
+
+Return JSON array of relevant URLs (up to 3 best alternatives):
+[
+  "url1",
+  "url2", 
+  "url3"
+]
+
+Only include URLs that are likely to have:
+- Better exhibition images
+- More detailed content
+- Press release or artist statement
+- Installation views or artwork details
+
+Exclude: navigation, contact, social media, unrelated exhibitions.
+
+HTML CONTENT:
+${html.substring(0, 30000)}
+
+JSON:`;
+
+    const result = await model.generateContent(alternativePrompt);
+    const jsonStr = result.response.text().replace(/```json|```/g, '').trim();
+    const urls = JSON.parse(jsonStr);
+    
+    // Convert relative URLs to absolute
+    const baseUrl = new URL(url);
+    const absoluteUrls = urls.map((relUrl: string) => {
+      if (relUrl.startsWith('/')) {
+        return `${baseUrl.origin}${relUrl}`;
+      } else if (!relUrl.startsWith('http')) {
+        return `${url.replace(/\/$/, '')}/${relUrl}`;
+      }
+      return relUrl;
+    }).filter((u: string) => u !== url); // Don't include the same URL
+    
+    console.log(`🔗 Found ${absoluteUrls.length} alternative URLs: ${absoluteUrls.slice(0, 2).join(', ')}${absoluteUrls.length > 2 ? '...' : ''}`);
+    return absoluteUrls;
+    
+  } catch (error) {
+    console.warn(`⚠️ Alternative URL search failed: ${error instanceof Error ? error.message : String(error)}`);
+    return [];
+  }
+}
+
+/**
+ * Agentic multi-step URL discovery and enrichment
+ */
+export async function agenticUrlDiscovery(
+  showTitle: string,
+  artistNames: string[],
+  galleryWebsite?: string
+): Promise<string | null> {
+  console.log(`🤖 Starting agentic URL discovery for "${showTitle}" by ${artistNames.join(', ')}`);
+  
+  // Step 1: Try gallery website first if available
+  if (galleryWebsite) {
+    const galleryUrl = await searchGalleryWebsiteForShow(galleryWebsite, showTitle, artistNames);
+    if (galleryUrl) {
+      const validation = await validateUrlContent(galleryUrl, showTitle);
+      if (validation.hasGoodContent) {
+        console.log(`✅ Found good content on gallery website: ${galleryUrl}`);
+        return galleryUrl;
+      } else {
+        console.log(`⚠️ Gallery URL has poor content, checking alternatives...`);
+        const alternatives = await findAlternativeUrls(galleryUrl, showTitle);
+        for (const altUrl of alternatives.slice(0, 2)) { // Check top 2 alternatives
+          const altValidation = await validateUrlContent(altUrl, showTitle);
+          if (altValidation.hasGoodContent) {
+            console.log(`✅ Found good content on alternative URL: ${altUrl}`);
+            return altUrl;
+          }
+        }
+      }
+    }
+  }
+  
+  // Step 2: Fallback to Google search via existing web search service
+  console.log(`🔍 Fallback: Using Google search for external discovery...`);
+  
+  try {
+    const { WebSearchService } = await import('../services/webSearchService');
+    const webSearch = new WebSearchService();
+    
+    const searchQuery = `"${showTitle}" ${artistNames.join(' ')} ${galleryWebsite || ''} art exhibition 2025`;
+    console.log(`🔍 Google search query: ${searchQuery}`);
+    
+    const searchResults = await webSearch.searchExhibitions(searchQuery);
+    
+    if (searchResults.length === 0) {
+      console.log(`❌ No search results found`);
+      return null;
+    }
+    
+         // Try to find the best URL from search results
+     for (const result of searchResults.slice(0, 3)) { // Check top 3 results
+       // Special handling for arthap.com
+       if (result.link.includes('arthap.com')) {
+         const arthapLinks = await extractArthapLinks(result.link);
+         if (arthapLinks.eventUrl) {
+           const validation = await validateUrlContent(arthapLinks.eventUrl, showTitle);
+           if (validation.hasGoodContent) {
+             console.log(`✅ Found good content via arthap.com: ${arthapLinks.eventUrl}`);
+             return arthapLinks.eventUrl;
+           }
+         }
+       } else {
+         // Direct URL validation
+         const validation = await validateUrlContent(result.link, showTitle);
+         if (validation.hasGoodContent) {
+           console.log(`✅ Found good content via search: ${result.link}`);
+           return result.link;
+         } else {
+           // Try alternative URLs on this page
+           const alternatives = await findAlternativeUrls(result.link, showTitle);
+           for (const altUrl of alternatives.slice(0, 2)) {
+             const altValidation = await validateUrlContent(altUrl, showTitle);
+             if (altValidation.hasGoodContent) {
+               console.log(`✅ Found good content on alternative URL: ${altUrl}`);
+               return altUrl;
+             }
+           }
+         }
+       }
+     }
+    
+    console.log(`⚠️ No good content found in search results`);
+    return null;
+    
+  } catch (error) {
+    console.warn(`⚠️ Google search fallback failed: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
 export async function extractShowFields(html: string, galleryUrl: string): Promise<Partial<ShowData>> {
   // Initialize genAI after environment is loaded
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
@@ -280,115 +604,140 @@ IMPORTANT:
 HTML CONTENT:
 ${html}`;
 
-  let rawResponse = '';
-  try {
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
-    rawResponse = text; // Store for error logging
+  const MAX_RETRIES = 3;
+  let lastError: Error | null = null;
+  
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    let rawResponse = '';
     
-    console.log(`📝 Gemini response length: ${text.length} characters`);
-    
-    // Clean JSON (remove markdown formatting)
-    let jsonStr = text.replace(/```json|```/g, '').trim();
-    
-    // Handle potential JSON parsing issues
-    if (jsonStr.startsWith('```')) {
-      jsonStr = jsonStr.replace(/```[\w]*\n?/g, '').trim();
-    }
-    
-    console.log(`🔍 Attempting to parse JSON (${jsonStr.length} chars): ${jsonStr.substring(0, 200)}...`);
-    
-    let parsed;
     try {
-      // First try - direct parsing
-      parsed = JSON.parse(jsonStr);
-    } catch (firstError) {
-      console.log(`⚠️ Initial JSON parse failed, trying cleanup: ${firstError instanceof Error ? firstError.message : String(firstError)}`);
+      console.log(`📝 Gemini extraction attempt ${attempt}/${MAX_RETRIES}...`);
       
+      const result = await model.generateContent(prompt);
+      const text = result.response.text();
+      rawResponse = text; // Store for error logging
+      
+      console.log(`📝 Gemini response length: ${text.length} characters`);
+      
+      // Clean JSON (remove markdown formatting)
+      let jsonStr = text.replace(/```json|```/g, '').trim();
+      
+      // Handle potential JSON parsing issues
+      if (jsonStr.startsWith('```')) {
+        jsonStr = jsonStr.replace(/```[\w]*\n?/g, '').trim();
+      }
+      
+      console.log(`🔍 Attempting to parse JSON (${jsonStr.length} chars): ${jsonStr.substring(0, 200)}...`);
+      
+      let parsed;
       try {
-        // Second try - basic cleanup
-        let cleanedJson = jsonStr;
+        // Try direct parsing
+        parsed = JSON.parse(jsonStr);
+        console.log(`✅ JSON parsed successfully on attempt ${attempt}`);
+      } catch (jsonError) {
+        console.log(`⚠️ JSON parse failed on attempt ${attempt}: ${jsonError instanceof Error ? jsonError.message : String(jsonError)}`);
         
-        // Only fix obvious issues without aggressive regex
-        cleanedJson = cleanedJson.replace(/,(\s*[}\]])/g, '$1'); // Remove trailing commas
-        cleanedJson = cleanedJson.replace(/[\r\n]+/g, ' '); // Replace newlines with spaces in strings
-        cleanedJson = cleanedJson.replace(/\s+/g, ' '); // Normalize whitespace
+        // If this is the last attempt, try basic cleanup as fallback
+        if (attempt === MAX_RETRIES) {
+          console.log(`🔧 Last attempt - trying basic JSON cleanup...`);
+          try {
+            let cleanedJson = jsonStr;
+            cleanedJson = cleanedJson.replace(/,(\s*[}\]])/g, '$1'); // Remove trailing commas
+            cleanedJson = cleanedJson.replace(/[\r\n]+/g, ' '); // Replace newlines with spaces in strings
+            cleanedJson = cleanedJson.replace(/\s+/g, ' '); // Normalize whitespace
+            
+            parsed = JSON.parse(cleanedJson);
+            console.log(`✅ JSON parsed after cleanup on final attempt`);
+          } catch (cleanupError) {
+            console.error(`💥 JSON parsing failed even after cleanup on final attempt:`);
+            console.error(`Parse error: ${jsonError instanceof Error ? jsonError.message : String(jsonError)}`);
+            console.error(`Cleanup error: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
+            console.error(`Raw response: ${rawResponse.substring(0, 1000)}...`);
+            throw new Error(`Gemini extraction failed: ${jsonError instanceof Error ? jsonError.message : String(jsonError)}`);
+          }
+        } else {
+          // For non-final attempts, just throw to trigger retry
+          throw jsonError;
+        }
+      }
+      
+      // Process and validate images according to mobile-first strategy
+      // Include any existing image URL for cleaning (might be Artforum URL from previous extraction)
+      const processedImages = processExtractedImages(
+        parsed.image_url || '',
+        parsed.additional_images || [],
+        galleryUrl,
+        parsed.image_url // Pass existing image URL for cleaning
+      );
+      
+      // Log image processing results
+      const originalImageCount = (parsed.image_url ? 1 : 0) + (parsed.additional_images?.length || 0);
+      const processedImageCount = (processedImages.image_url ? 1 : 0) + processedImages.additional_images.length;
+      console.log(`📸 Image processing: ${originalImageCount} → ${processedImageCount} images (${processedImages.image_url ? 'primary set' : 'no primary'})`);
+      
+      // Generate summary if press release exists and no summary was provided
+      let generatedSummary = parsed.show_summary || '';
+      if (!generatedSummary && parsed.press_release && parsed.press_release.length > 100) {
+        try {
+          console.log(`📝 Generating summary from ${parsed.press_release.length} char press release...`);
+          generatedSummary = await generateShowSummary(
+            parsed.press_release, 
+            parsed.title, 
+            parsed.artists?.[0]
+          );
+          console.log(`✅ Generated summary: ${generatedSummary.length} characters`);
+        } catch (error) {
+          console.warn(`⚠️ Summary generation failed: ${error instanceof Error ? error.message : String(error)}`);
+          // Continue without summary - not a critical failure
+        }
+      }
+      
+      return {
+        ...parsed,
+        // Override image fields with processed results
+        image_url: processedImages.image_url,
+        additional_images: processedImages.additional_images,
+        // Add generated summary
+        show_summary: generatedSummary,
+        // Standard metadata
+        gallery_url: galleryUrl,
+        extracted_at: new Date().toISOString(),
+        has_been_enriched: true,
+        source_url: galleryUrl
+      };
+      
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      lastError = error instanceof Error ? error : new Error(message);
+      
+      // Check for rate limiting specifically - don't retry on rate limits
+      if (message.includes('429') || message.includes('Too Many Requests') || message.includes('quota')) {
+        throw new Error(`RATE_LIMIT: Gemini API rate limit exceeded. ${message}`);
+      }
+      
+      // Log retry attempts
+      if (attempt < MAX_RETRIES) {
+        console.log(`🔄 Retrying Gemini extraction (${attempt}/${MAX_RETRIES}) after error: ${message}`);
+        // Wait before retry (exponential backoff)
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+      } else {
+        console.error(`💥 All ${MAX_RETRIES} Gemini extraction attempts failed`);
         
-        parsed = JSON.parse(cleanedJson);
-        console.log(`✅ JSON parsed after basic cleanup`);
-      } catch (secondError) {
-        console.error(`💥 JSON parsing failed even after cleanup:`);
-        console.error(`First error: ${firstError instanceof Error ? firstError.message : String(firstError)}`);
-        console.error(`Second error: ${secondError instanceof Error ? secondError.message : String(secondError)}`);
-        console.error(`Raw response: ${rawResponse.substring(0, 1000)}...`);
-        throw new Error(`Gemini extraction failed: ${firstError instanceof Error ? firstError.message : String(firstError)}`);
+        // Enhanced error logging for JSON parsing issues
+        if (error instanceof SyntaxError && error.message.includes('JSON')) {
+          console.error('🚨 JSON Parsing Error Details:');
+          console.error('Error:', error.message);
+          console.error('Raw Gemini response (first 500 chars):', rawResponse.substring(0, 500));
+          console.error('Response length:', rawResponse.length);
+          console.error('Last 200 chars:', rawResponse.slice(-200));
+        }
       }
     }
-    
-    // Process and validate images according to mobile-first strategy
-    // Include any existing image URL for cleaning (might be Artforum URL from previous extraction)
-    const processedImages = processExtractedImages(
-      parsed.image_url || '',
-      parsed.additional_images || [],
-      galleryUrl,
-      parsed.image_url // Pass existing image URL for cleaning
-    );
-    
-    // Log image processing results
-    const originalImageCount = (parsed.image_url ? 1 : 0) + (parsed.additional_images?.length || 0);
-    const processedImageCount = (processedImages.image_url ? 1 : 0) + processedImages.additional_images.length;
-    console.log(`📸 Image processing: ${originalImageCount} → ${processedImageCount} images (${processedImages.image_url ? 'primary set' : 'no primary'})`);
-    
-    // Generate summary if press release exists and no summary was provided
-    let generatedSummary = parsed.show_summary || '';
-    if (!generatedSummary && parsed.press_release && parsed.press_release.length > 100) {
-      try {
-        console.log(`📝 Generating summary from ${parsed.press_release.length} char press release...`);
-        generatedSummary = await generateShowSummary(
-          parsed.press_release, 
-          parsed.title, 
-          parsed.artists?.[0]
-        );
-        console.log(`✅ Generated summary: ${generatedSummary.length} characters`);
-      } catch (error) {
-        console.warn(`⚠️ Summary generation failed: ${error instanceof Error ? error.message : String(error)}`);
-        // Continue without summary - not a critical failure
-      }
-    }
-    
-    return {
-      ...parsed,
-      // Override image fields with processed results
-      image_url: processedImages.image_url,
-      additional_images: processedImages.additional_images,
-      // Add generated summary
-      show_summary: generatedSummary,
-      // Standard metadata
-      gallery_url: galleryUrl,
-      extracted_at: new Date().toISOString(),
-      has_been_enriched: true,
-      source_url: galleryUrl
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    
-    // Check for rate limiting specifically
-    if (message.includes('429') || message.includes('Too Many Requests') || message.includes('quota')) {
-      throw new Error(`RATE_LIMIT: Gemini API rate limit exceeded. ${message}`);
-    }
-    
-    // Enhanced error logging for JSON parsing issues
-    if (error instanceof SyntaxError && error.message.includes('JSON')) {
-      console.error('🚨 JSON Parsing Error Details:');
-      console.error('Error:', error.message);
-      console.error('Raw Gemini response (first 500 chars):', rawResponse.substring(0, 500));
-      console.error('Response length:', rawResponse.length);
-      console.error('Last 200 chars:', rawResponse.slice(-200));
-    }
-    
-    throw new Error(`Gemini extraction failed: ${message}`);
   }
+  
+  // If we get here, all retries failed
+  throw new Error(`Gemini extraction failed after ${MAX_RETRIES} attempts: ${lastError?.message || 'Unknown error'}`);
 }
 
-// Export for testing
-export { processExtractedImages, cleanExistingArtforumImages };
+// Export for testing and discovery pipeline
+export { processExtractedImages, cleanExistingArtforumImages, extractArthapLinks, validateUrlContent, findAlternativeUrls };

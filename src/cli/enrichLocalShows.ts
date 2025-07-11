@@ -64,7 +64,7 @@ async function enrichLocalShows(localTestFile: string): Promise<void> {
     console.log('');
     
     // Load local unenriched test set
-    const localTestPath = path.join('outputs', localTestFile);
+    const localTestPath = localTestFile.startsWith('outputs/') ? localTestFile : path.join('outputs', localTestFile);
     if (!fs.existsSync(localTestPath)) {
       throw new Error(`Local test set file not found: ${localTestPath}`);
     }
