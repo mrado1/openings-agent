@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
+import { Client } from 'pg';
 import { DiscoveryPipeline } from '../discovery/discoveryPipeline';
 import { ShowSearchContext } from '../discovery/searchQueryBuilder';
 
@@ -44,6 +45,11 @@ interface EnrichedLocalShow extends LocalUnenrichedShow {
     enrichment_timestamp: string;
     errors: string[];
   };
+  // Phase 2: Enhanced metadata fields
+  artist_metadata?: {
+    medium?: string[];
+    career_stage?: string;
+  };
 }
 
 interface EnrichmentResults {
@@ -58,9 +64,117 @@ interface EnrichmentResults {
   extracted_at: string;
 }
 
-async function enrichLocalShows(localTestFile: string): Promise<void> {
+async function updateDatabaseWithEnrichment(enrichedShows: EnrichedLocalShow[], isDryRun: boolean = false): Promise<void> {
+  const client = new Client({
+    host: 'localhost',
+    port: 5433,
+    database: 'scene_dev',
+    user: 'scene',
+    password: 'dev_password',
+  });
+
+  try {
+    await client.connect();
+    console.log('🔗 Connected to database for updates');
+    
+    let updatedCount = 0;
+    let skippedCount = 0;
+    
+    for (const show of enrichedShows) {
+      if (!show.ai_enrichment.success) {
+        console.log(`   ⏭️  Skipping ${show.title} - enrichment failed`);
+        skippedCount++;
+        continue;
+      }
+      
+      if (isDryRun) {
+        console.log(`   🔍 [DRY RUN] Would update show ${show.id}: ${show.title}`);
+        console.log(`     - has_been_enriched: ${show.has_been_enriched}`);
+        console.log(`     - ai_enrichment metadata: ${JSON.stringify(show.ai_enrichment)}`);
+        if (show.artist_metadata) {
+          console.log(`     - artist_metadata: ${JSON.stringify(show.artist_metadata)}`);
+        }
+        continue;
+      }
+      
+      // Update the shows table with enriched data
+      await client.query(`
+        UPDATE shows 
+        SET 
+          press_release = $1,
+          image_url = $2,
+          additional_images = $3,
+          show_summary = $4,
+          has_been_enriched = $5,
+          ai_enrichment = $6,
+          enriched_at = $7,
+          show_url = $8
+        WHERE id = $9
+      `, [
+        show.press_release,
+        show.image_url,
+        show.additional_images,
+        show.show_summary,
+        show.has_been_enriched,
+        JSON.stringify(show.ai_enrichment),
+        new Date(show.ai_enrichment.enrichment_timestamp),
+        show.ai_enrichment.discovered_url,
+        show.id
+      ]);
+      
+      updatedCount++;
+      console.log(`   ✅ Updated show ${show.id}: ${show.title}`);
+      
+      // Phase 2: Update artist metadata if available
+      if (show.artist_metadata && show.artist_names.length > 0) {
+        for (const artistName of show.artist_names) {
+          // Check if artist exists
+          const artistResult = await client.query('SELECT id FROM artists WHERE name = $1', [artistName]);
+          
+          if (artistResult.rows.length > 0) {
+            const artistId = artistResult.rows[0].id;
+            
+            // Update artist with Phase 2 metadata
+            if (show.artist_metadata.medium) {
+              await client.query(`
+                UPDATE artists 
+                SET medium = $1 
+                WHERE id = $2
+              `, [show.artist_metadata.medium, artistId]);
+              console.log(`     🎨 Updated artist ${artistName} medium: ${show.artist_metadata.medium.join(', ')}`);
+            }
+            
+            if (show.artist_metadata.career_stage) {
+              await client.query(`
+                UPDATE artists 
+                SET career_stage = $1 
+                WHERE id = $2
+              `, [show.artist_metadata.career_stage, artistId]);
+              console.log(`     👤 Updated artist ${artistName} career stage: ${show.artist_metadata.career_stage}`);
+            }
+          }
+        }
+      }
+    }
+    
+    console.log(`\n📊 Database update summary:`);
+    console.log(`   ✅ Updated shows: ${updatedCount}`);
+    console.log(`   ⏭️  Skipped shows: ${skippedCount}`);
+    
+  } catch (error: any) {
+    console.error(`💥 Database update error: ${error.message}`);
+    throw error;
+  } finally {
+    await client.end();
+  }
+}
+
+async function enrichLocalShows(localTestFile: string, updateDatabase: boolean = false, dryRun: boolean = false): Promise<void> {
   try {
     console.log(`🔬 Starting AI enrichment of local shows: ${localTestFile}`);
+    if (updateDatabase) {
+      console.log(`📊 Database updates: ${dryRun ? 'DRY RUN' : 'ENABLED'}`);
+    }
     console.log('');
     
     // Load local unenriched test set
@@ -102,7 +216,8 @@ async function enrichLocalShows(localTestFile: string): Promise<void> {
           title: localShow.title,
           artist: localShow.artist_names[0], // Use primary artist for search
           gallery: localShow.gallery_name,
-          year: year
+          year: year,
+          gallery_website: localShow.gallery_website || undefined
         };
         
         // Run AI discovery and extraction to enrich the show
@@ -161,6 +276,12 @@ async function enrichLocalShows(localTestFile: string): Promise<void> {
             qualityCriteriaMet++; // Accurate URL found criterion
           }
           
+          // Phase 2: Enhanced metadata extraction
+          if (aiData.artist_metadata) {
+            enrichedShow.artist_metadata = aiData.artist_metadata;
+            console.log(`   🎨 Extracted artist metadata: ${JSON.stringify(aiData.artist_metadata)}`);
+          }
+          
           // Update quality criteria count
           enrichedShow.ai_enrichment.quality_criteria_met = qualityCriteriaMet;
           
@@ -203,16 +324,9 @@ async function enrichLocalShows(localTestFile: string): Promise<void> {
         
         enrichedShows.push(failedShow);
       }
-      
-      // Wait between requests to avoid rate limits
-      if (i < localTestSet.local_unenriched_shows.length - 1) {
-        console.log(`   ⏳ Waiting 2 seconds before next enrichment...`);
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      }
     }
     
-    const endTime = Date.now();
-    const processingTime = Math.round((endTime - startTime) / 1000);
+    const processingTime = Math.round((Date.now() - startTime) / 1000);
     
     // Create enrichment results
     const enrichmentResults: EnrichmentResults = {
@@ -228,14 +342,14 @@ async function enrichLocalShows(localTestFile: string): Promise<void> {
     };
     
     // Save enrichment results
-    const resultFilename = `local_enrichment_${Date.now()}.json`;
+    const resultFilename = `enrichment_results_${Date.now()}.json`;
     const resultPath = path.join('outputs', resultFilename);
     fs.writeFileSync(resultPath, JSON.stringify(enrichmentResults, null, 2));
     
-    console.log('\n🎯 LOCAL ENRICHMENT COMPLETE');
-    console.log('============================');
-    console.log(`✅ Success Rate: ${enrichmentResults.success_rate}% (${successCount}/${localTestSet.local_unenriched_shows.length})`);
-    console.log(`⏱️  Total Time: ${processingTime} seconds`);
+    console.log('\n🎯 AI ENRICHMENT COMPLETE');
+    console.log('=========================');
+    console.log(`📊 Success Rate: ${enrichmentResults.success_rate}% (${successCount}/${localTestSet.local_unenriched_shows.length})`);
+    console.log(`⏱️  Processing Time: ${processingTime} seconds`);
     console.log(`📁 Results saved to: ${resultFilename}`);
     
     if (errors.length > 0) {
@@ -245,11 +359,17 @@ async function enrichLocalShows(localTestFile: string): Promise<void> {
       });
     }
     
-    console.log(`\n🔗 Next step: Compare enriched local data to production with:`);
-    console.log(`npm run compare-local-to-production ${resultFilename}`);
+    // Update database if requested
+    if (updateDatabase) {
+      console.log('\n📊 UPDATING DATABASE');
+      console.log('====================');
+      await updateDatabaseWithEnrichment(enrichedShows, dryRun);
+    }
+    
+    console.log(`\n🔗 Next step: ${updateDatabase ? 'Database updated!' : 'Run with --update-database to update database'}`);
     
   } catch (error: any) {
-    console.error(`💥 Local enrichment failed: ${error.message}`);
+    console.error(`💥 Enrichment failed: ${error.message}`);
     throw error;
   }
 }
@@ -260,17 +380,17 @@ async function main() {
   
   if (args.length === 0) {
     console.error('❌ Please provide local test set file name');
-    console.log('Usage: npm run enrich-local-shows <local_unenriched_set_file.json>');
-    console.log('Example: npm run enrich-local-shows local_unenriched_set_1752181066112.json');
+    console.log('Usage: npm run enrich-local-shows <local_test_file.json> [--update-database] [--dry-run]');
+    console.log('Example: npm run enrich-local-shows local_unenriched_test_set_1234567890.json --update-database');
     process.exit(1);
   }
 
   const localTestFile = args[0];
-  
-  // API keys will be validated by the services that use them
+  const updateDatabase = args.includes('--update-database');
+  const dryRun = args.includes('--dry-run');
   
   try {
-    await enrichLocalShows(localTestFile);
+    await enrichLocalShows(localTestFile, updateDatabase, dryRun);
   } catch (error: any) {
     console.error(`💥 Failed: ${error.message}`);
     process.exit(1);
