@@ -101,7 +101,7 @@ async function enrichTestShows(localTestFile: string): Promise<void> {
     const startTime = Date.now();
     
     // Process shows in parallel batches for speed while respecting API rate limits
-    const BATCH_SIZE = 5; // Process 5 shows concurrently
+    const BATCH_SIZE = 2; // Process 2 shows concurrently (reduced to avoid rate limits)
     const BATCH_DELAY = 3000; // 3 second delay between batches
     
     const batches = [];
