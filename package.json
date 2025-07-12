@@ -28,6 +28,7 @@
     "query-unenriched-shows": "ts-node src/query-unenriched-shows.ts",
     "query-production-enriched": "ts-node src/query-production-enriched.ts",
     "enrich-test-shows": "ts-node src/cli/enrichTestShows.ts",
+    "regenerate-summaries": "ts-node src/cli/regenerateSummaries.ts",
     "compare-ai-vs-production": "ts-node src/analysis/compareAIvsProduction.ts",
     "test-dates": "npm run extract-enhanced https://www.pacegallery.com/exhibitions/alicja-kwade-telos-tales/ && npm run compare-extraction",
     "test-press-release": "npm run extract-enhanced https://www.pacegallery.com/exhibitions/alicja-kwade-telos-tales/ && npm run compare-extraction"
