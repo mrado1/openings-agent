@@ -166,8 +166,8 @@ async function main() {
   const args = process.argv.slice(2);
   const limit = args[0] ? parseInt(args[0]) : 10;
   
-  if (limit <= 0 || limit > 50) {
-    console.error('❌ Please provide a valid limit (1-50)');
+  if (limit <= 0 || limit > 500) {
+    console.error('❌ Please provide a valid limit (1-500)');
     process.exit(1);
   }
 

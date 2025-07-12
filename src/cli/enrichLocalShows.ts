@@ -27,11 +27,16 @@ interface LocalUnenrichedShow {
 }
 
 interface LocalTestSet {
-  production_reference: string;
-  local_unenriched_shows: LocalUnenrichedShow[];
-  match_criteria: string;
-  matched_count: number;
-  unmatched_shows: string[];
+  selection_criteria: string;
+  local_shows: LocalUnenrichedShow[];
+  selected_count: number;
+  total_unenriched: number;
+  missing_data_analysis: {
+    no_press_release: number;
+    no_images: number;
+    no_summary: number;
+    no_gallery_website: number;
+  };
   extracted_at: string;
 }
 
@@ -184,9 +189,9 @@ async function enrichLocalShows(localTestFile: string, updateDatabase: boolean =
     }
     
     const localTestSet: LocalTestSet = JSON.parse(fs.readFileSync(localTestPath, 'utf8'));
-    console.log(`📋 Loaded ${localTestSet.local_unenriched_shows.length} local unenriched shows`);
-    console.log(`🔗 Production reference: ${localTestSet.production_reference}`);
-    console.log(`🎯 Match criteria: ${localTestSet.match_criteria}`);
+    console.log(`📋 Loaded ${localTestSet.local_shows.length} local unenriched shows`);
+    console.log(`🔗 Selection criteria: ${localTestSet.selection_criteria}`);
+    console.log(`🎯 Total unenriched: ${localTestSet.total_unenriched}`);
     console.log('');
     
     const pipeline = new DiscoveryPipeline();
@@ -197,9 +202,9 @@ async function enrichLocalShows(localTestFile: string, updateDatabase: boolean =
     const startTime = Date.now();
     
     // Process each local unenriched show
-    for (let i = 0; i < localTestSet.local_unenriched_shows.length; i++) {
-      const localShow = localTestSet.local_unenriched_shows[i];
-      console.log(`\n🔬 [${i + 1}/${localTestSet.local_unenriched_shows.length}] Enriching: "${localShow.title}"`);
+    for (let i = 0; i < localTestSet.local_shows.length; i++) {
+      const localShow = localTestSet.local_shows[i];
+      console.log(`\n🔬 [${i + 1}/${localTestSet.local_shows.length}] Enriching: "${localShow.title}"`);
       console.log(`   Artist: ${localShow.artist_names.join(', ')}`);
       console.log(`   Gallery: ${localShow.gallery_name}`);
       console.log(`   Current status: enriched=${localShow.has_been_enriched}`);
@@ -331,12 +336,12 @@ async function enrichLocalShows(localTestFile: string, updateDatabase: boolean =
     // Create enrichment results
     const enrichmentResults: EnrichmentResults = {
       local_test_reference: localTestFile,
-      production_test_reference: localTestSet.production_reference,
+      production_test_reference: localTestSet.selection_criteria,
       enriched_shows: enrichedShows,
-      success_rate: Math.round((successCount / localTestSet.local_unenriched_shows.length) * 100),
-      total_shows: localTestSet.local_unenriched_shows.length,
+      success_rate: Math.round((successCount / localTestSet.local_shows.length) * 100),
+      total_shows: localTestSet.local_shows.length,
       successful_enrichments: successCount,
-      failed_enrichments: localTestSet.local_unenriched_shows.length - successCount,
+      failed_enrichments: localTestSet.local_shows.length - successCount,
       processing_time_seconds: processingTime,
       extracted_at: new Date().toISOString()
     };
@@ -348,7 +353,7 @@ async function enrichLocalShows(localTestFile: string, updateDatabase: boolean =
     
     console.log('\n🎯 AI ENRICHMENT COMPLETE');
     console.log('=========================');
-    console.log(`📊 Success Rate: ${enrichmentResults.success_rate}% (${successCount}/${localTestSet.local_unenriched_shows.length})`);
+    console.log(`📊 Success Rate: ${enrichmentResults.success_rate}% (${successCount}/${localTestSet.local_shows.length})`);
     console.log(`⏱️  Processing Time: ${processingTime} seconds`);
     console.log(`📁 Results saved to: ${resultFilename}`);
     
