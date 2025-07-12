@@ -57,12 +57,8 @@ Summary:`;
         .map((s: string) => s.trim())
         .join('. ') + '.';
       
-      // Ensure mobile-friendly length (under 300 chars)
-      if (threeSentences.length > 300) {
-        const truncated = threeSentences.substring(0, 297) + '...';
-        console.log(`📱 Truncated summary for mobile: ${threeSentences.length} → ${truncated.length} chars`);
-        return truncated;
-      }
+      // Allow full 3-sentence summaries (removed aggressive mobile truncation)
+      // 3 sentences are naturally mobile-friendly without character limits
       
       console.log(`✅ Generated summary: ${threeSentences.length} characters, ${sentences.length} sentences`);
       return threeSentences;
