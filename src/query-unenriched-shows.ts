@@ -59,7 +59,7 @@ async function queryUnenrichedShows(limit: number = 10): Promise<void> {
         COUNT(*) FILTER (WHERE g.website IS NULL OR g.website = '') as no_gallery_website
       FROM shows s 
       JOIN galleries g ON s.gallery_id = g.id
-      WHERE s.has_been_enriched = false;
+      WHERE s.has_been_enriched = false AND s.ai_enrichment IS NULL;
     `);
 
     const stats = statsResult.rows[0];
@@ -77,7 +77,7 @@ async function queryUnenrichedShows(limit: number = 10): Promise<void> {
       FROM shows s 
       JOIN galleries g ON s.gallery_id = g.id
       JOIN artists a ON a.id = ANY(s.artist_ids)
-      WHERE s.has_been_enriched = false
+      WHERE s.has_been_enriched = false AND s.ai_enrichment IS NULL
       AND g.website IS NOT NULL AND g.website != ''
       GROUP BY s.id, g.id, g.name, g.website, g.address
       ORDER BY 
@@ -134,7 +134,7 @@ async function queryUnenrichedShows(limit: number = 10): Promise<void> {
     });
 
     const testSet: LocalTestSet = {
-      selection_criteria: 'Unenriched shows prioritizing missing press_release, diverse galleries, has gallery_website',
+      selection_criteria: 'Never attempted enrichment (ai_enrichment IS NULL), prioritizing missing press_release, diverse galleries, has gallery_website',
       local_shows: selectedShows,
       selected_count: selectedShows.length,
       total_unenriched: parseInt(stats.total_unenriched),
